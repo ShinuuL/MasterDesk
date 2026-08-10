@@ -578,3 +578,38 @@ Build a strong local MasterDesk core first.
 > When you don't know, don't invent. Research it or ask the DEV.
 
 MasterDesk must remain extensible, secure, cross-platform and independent of any single external integration.
+
+## Collaborative Development Rule
+
+This project is developed by multiple developers and AI agents.
+
+Before modifying a file:
+
+1. Check the current branch and repository status.
+2. Inspect recent changes to the target file.
+3. Avoid modifying unrelated files.
+4. Do not refactor unrelated code while implementing a feature.
+5. Keep commits small and focused.
+6. Never rewrite another developer's work without explicit authorization.
+7. Do not change public interfaces without first checking for consumers.
+8. If an architectural contract needs to change, stop and ask the DEV.
+9. Before finishing, verify that the branch can be rebased onto the current main.
+10. Report files changed and potential integration risks.
+
+### Scope Rule
+
+A task must modify only the files and modules necessary to complete that task.
+
+Do not perform opportunistic refactoring.
+
+### Integration Rule
+
+Before creating a PR:
+
+- Fetch the latest main.
+- Rebase the branch onto main.
+- Run formatting.
+- Run linting.
+- Run tests.
+- Run the project build.
+- Verify no unrelated files were changed.
