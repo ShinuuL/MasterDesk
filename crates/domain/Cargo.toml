@@ -1,0 +1,15 @@
+[package]
+name = "masterdesk-domain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# IMPORTANTE (seção 4 do CLAUDE.md): este crate NUNCA deve depender de
+# tauri, sqlx, reqwest, ou qualquer coisa de infraestrutura/UI. Se um PR
+# adicionar uma dessas dependências aqui, é uma violação de arquitetura.
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }

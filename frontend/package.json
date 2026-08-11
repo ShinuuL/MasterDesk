@@ -1,0 +1,24 @@
+{
+  "name": "masterdesk-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "//": "PROVISÓRIO: React aqui é o protótipo A do item pendente do ADR-002. O protótipo B (Svelte) deve ser criado em paralelo antes de fechar a decisão com o DEV.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/api": "^2",
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.1"
+  }
+}
