@@ -44,8 +44,8 @@ jobs:
       - name: Cargo test
         run: cargo test --workspace
 
-  frontend-checks:
-    name: Frontend Checks
+  frontend-react:
+    name: Frontend (React)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -69,9 +69,34 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+  frontend-svelte:
+    name: Frontend (Svelte)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: 'npm'
+          cache-dependency-path: frontend-svelte/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend-svelte
+        run: npm ci
+
+      - name: Svelte check
+        working-directory: frontend-svelte
+        run: npm run check
+
+      - name: Build frontend
+        working-directory: frontend-svelte
+        run: npm run build
+
   tauri-build:
     name: Tauri Build
-    needs: [rust-checks, frontend-checks]
+    needs: [rust-checks, frontend-react, frontend-svelte]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
