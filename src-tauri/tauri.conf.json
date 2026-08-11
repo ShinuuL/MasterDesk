@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MasterDesk",
+  "version": "0.1.0",
+  "identifier": "com.masterdesk.app",
+  "build": {
+    "beforeDevCommand": "npm run dev --prefix ../frontend",
+    "beforeBuildCommand": "npm run build --prefix ../frontend",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../frontend/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "MasterDesk",
+        "width": 400,
+        "height": 300,
+        "resizable": true,
+        "alwaysOnTop": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.png"
+    ]
+  }
+}

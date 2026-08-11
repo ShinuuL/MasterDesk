@@ -1,0 +1,12 @@
+[package]
+name = "masterdesk-application"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Depende apenas de domain (traits/entidades). Ainda sem dependência de
+# infraestrutura concreta — recebe implementações dos ports via injeção.
+[dependencies]
+masterdesk-domain = { path = "../domain" }
+async-trait = { workspace = true }
+chrono = { workspace = true }
