@@ -1,6 +1,6 @@
 # ADR-002 — UI / Window Management Framework
 
-**Status:** Confirmado — Aguardando pesquisa mais apronfunda e mock-ups para validação.
+**Status:** Confirmado — React escolhido como frontend (validado em 2026-08-11).
 **Data:** 2026-08-11
 
 ## Contexto
@@ -50,8 +50,7 @@ pesquisa eram Tauri, Slint, egui e Iced.
 ## Decisão
 
 Adotar **Tauri 2** para janelas/empacotamento desktop, com frontend em
-**TypeScript + React** (a confirmar entre React/Svelte na Fase 1, ambos suportados
-oficialmente pelo Tauri).
+**TypeScript + React** (decisão validada na Fase 1, protótipo Svelte descartado).
 
 Manter **Slint como alternativa documentada** caso, durante a Fase 2, os bugs de
 always-on-top no Linux/Wayland do Tauri se mostrem bloqueantes — nesse caso,
@@ -74,5 +73,4 @@ camada de UI (mas não o domínio Rust, que é framework-agnóstico).
 ## Nota dos Devs:
 
 - Decisão aceita: Tauri 2 + Slint como alternativa para o always-on-top.
-- Aceito a integração da UI com typescript + react, fazer pesquisa e validar com o DEV se
-  devera continuar com essa linguagem ou não.
+- **Frontend confirmado: React** (protótipo Svelte descartado em 2026-08-11).

@@ -44,8 +44,8 @@ jobs:
       - name: Cargo test
         run: cargo test --workspace
 
-  frontend-checks:
-    name: Frontend Checks
+  frontend-react:
+    name: Frontend (React)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -71,7 +71,7 @@ jobs:
 
   tauri-build:
     name: Tauri Build
-    needs: [rust-checks, frontend-checks]
+    needs: [rust-checks, frontend-react]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
