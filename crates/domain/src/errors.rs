@@ -12,6 +12,9 @@ pub enum DomainError {
     #[error("validation failed: {0}")]
     Validation(String),
 
+    #[error("conflict: {0}")]
+    Conflict(String),
+
     #[error("persistence failure")]
     Persistence,
 

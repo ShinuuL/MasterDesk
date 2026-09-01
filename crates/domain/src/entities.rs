@@ -8,6 +8,7 @@ use crate::errors::{DomainError, DomainResult};
 
 pub type NoteId = Uuid;
 pub type TaskId = Uuid;
+pub type UserId = Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum Priority {
@@ -755,6 +756,140 @@ impl Task {
 
     fn touch(&mut self) {
         self.updated_at = Utc::now();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// User (Fase 4 — autenticação local)
+// ---------------------------------------------------------------------------
+
+/// Usuário local (sem Mastersys). O `password_hash` é um hash Argon2 opaco
+/// produzido pela infraestrutura — nunca plaintext. A inspeção/comparação do
+/// hash é responsabilidade da infraestrutura, não do domínio; o domínio apenas
+/// valida o formato do username e transporta o hash como string opaca.
+///
+/// Nunca serializar `password_hash` para a UI (seção 11/18 do CLAUDE.md).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct User {
+    pub id: UserId,
+    pub username: String,
+    pub password_hash: String,
+    pub created_at: DateTime<Utc>,
+}
+
+impl User {
+    /// Cria um usuário local com validação de domínio do username e do tamanho
+    /// mínimo de senha. O `password_hash` deve ser produzido pela camada de
+    /// infraestrutura via Argon2 e passado aqui como string opaca.
+    pub fn new(
+        username: impl Into<String>,
+        password_hash: impl Into<String>,
+    ) -> DomainResult<Self> {
+        let username = username.into();
+        let password_hash = password_hash.into();
+        validate_username(&username)?;
+        Ok(Self {
+            id: Uuid::new_v4(),
+            username: username.trim().to_string(),
+            password_hash,
+            created_at: Utc::now(),
+        })
+    }
+
+    /// Reconstrói um usuário a partir de dados persistidos (sem revalidar id/created_at).
+    /// Usado por adapters de infraestrutura.
+    pub fn reconstitute(
+        id: UserId,
+        username: String,
+        password_hash: String,
+        created_at: DateTime<Utc>,
+    ) -> DomainResult<Self> {
+        validate_username(&username)?;
+        Ok(Self {
+            id,
+            username: username.trim().to_string(),
+            password_hash,
+            created_at,
+        })
+    }
+}
+
+/// Valida username: 3-32 caracteres alfanuméricos (a-z, A-Z, 0-9, e _).
+pub fn validate_username(username: &str) -> DomainResult<()> {
+    let trimmed = username.trim();
+    if trimmed.len() < 3 {
+        return Err(DomainError::Validation(
+            "username must be at least 3 characters".into(),
+        ));
+    }
+    if trimmed.len() > 32 {
+        return Err(DomainError::Validation(
+            "username must be at most 32 characters".into(),
+        ));
+    }
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return Err(DomainError::Validation(
+            "username may only contain letters, digits and underscore".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Valida o tamanho mínimo da senha antes do hashing (a verificação de força
+/// real ocorre na infraestrutura durante o Argon2; aqui garantimos um mínimo).
+pub fn validate_password(password: &str) -> DomainResult<()> {
+    if password.len() < 8 {
+        return Err(DomainError::Validation(
+            "password must be at least 8 characters".into(),
+        ));
+    }
+    if password.len() > 1024 {
+        return Err(DomainError::Validation(
+            "password must be at most 1024 characters".into(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod user_tests {
+    use super::*;
+
+    #[test]
+    fn user_new_valid() {
+        let u = User::new("alice", "hashedvalue").unwrap();
+        assert_eq!(u.username, "alice");
+        assert_eq!(u.password_hash, "hashedvalue");
+        assert!(!u.username.is_empty());
+    }
+
+    #[test]
+    fn username_validation() {
+        assert!(User::new("ab", "x").is_err()); // too short
+        assert!(User::new("", "x").is_err()); // empty
+        assert!(User::new("alice!", "x").is_err()); // invalid char
+        let long = "a".repeat(33);
+        assert!(User::new(long, "x").is_err()); // too long
+        assert!(User::new("alice_1", "x").is_ok()); // underscore allowed
+        assert!(User::new("Álvaro", "x").is_err()); // non-ascii not allowed
+    }
+
+    #[test]
+    fn password_validation() {
+        assert!(validate_password("short").is_err()); // < 8
+        assert!(validate_password("password123").is_ok());
+        let long = "x".repeat(1025);
+        assert!(validate_password(&long).is_err());
+    }
+
+    #[test]
+    fn user_reconstitute() {
+        let u =
+            User::reconstitute(UserId::new_v4(), "bob".into(), "hash".into(), Utc::now()).unwrap();
+        assert_eq!(u.username, "bob");
     }
 }
 

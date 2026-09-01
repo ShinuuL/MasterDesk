@@ -14,6 +14,10 @@ interface Props {
   onDelete: (id: string) => void;
   onTogglePin: (id: string) => void;
   onToggleAot: (id: string) => void;
+  onPopOut?: (id: string) => void;
+  onCloseWindow?: (id: string) => void;
+  /** True when rendering in an isolated note-window (via ?note= URL) */
+  noteWindowMode?: boolean;
 }
 
 function textColorFor(bg: string): string {
@@ -23,7 +27,7 @@ function textColorFor(bg: string): string {
   return "#0F1115";
 }
 
-export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onToggleAot }: Props) {
+export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onToggleAot, onPopOut, onCloseWindow, noteWindowMode }: Props) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(note.title);
   const [content, setContent] = useState(note.content);
@@ -37,6 +41,9 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    // In note-window mode, don't prevent default — let the OS handle window dragging
+    if (noteWindowMode) return;
+
     const startX = e.clientX;
     const startY = e.clientY;
     dragRef.current = { x: startX, y: startY, orig: [...note.position] as [number, number] };
@@ -77,8 +84,20 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
   return (
     <div
       id={`note-${note.id}`}
-      className={`md-note ${note.pinned ? "md-note--pinned" : ""}`}
-      style={{
+      className={`md-note ${note.pinned ? "md-note--pinned" : ""} ${noteWindowMode ? "md-note--window" : ""}`}
+      style={noteWindowMode ? {
+        position: "relative",
+        left: "auto",
+        top: "auto",
+        width: "100%",
+        height: "100%",
+        borderRadius: 0,
+        border: "none",
+        background: note.color,
+        opacity: note.opacity,
+        color: ink,
+        resize: "none",
+      } : {
         left: note.position[0],
         top: note.position[1],
         width: note.size[0],
@@ -88,6 +107,7 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
         color: ink,
       }}
       onMouseUp={(e) => {
+        if (noteWindowMode) return;
         const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
         if (Math.abs(rect.width - note.size[0]) > 2 || Math.abs(rect.height - note.size[1]) > 2) {
           handleResizeEnd(Math.round(rect.width), Math.round(rect.height));
@@ -98,6 +118,9 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
     >
       <div
         onMouseDown={handleMouseDown}
+        {...(noteWindowMode
+          ? ({ "data-tauri-drag-region": "deep" } as React.HTMLAttributes<HTMLDivElement>)
+          : {})}
         className="md-note-head"
         style={{ color: ink, borderColor: isDark ? "rgba(255,255,255,.14)" : "rgba(15,17,21,.08)" }}
       >
@@ -111,6 +134,25 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
         <button onClick={() => onToggleAot(note.id)} title="Always on top" aria-pressed={note.always_on_top} className="md-icon-btn" style={{ color: ink, borderColor: isDark ? "rgba(255,255,255,.22)" : undefined, background: isDark ? "rgba(255,255,255,.12)" : undefined }}>
           {note.always_on_top ? "AOT off" : "AOT on"}
         </button>
+        {noteWindowMode ? (
+          <button
+            onClick={() => onCloseWindow?.(note.id)}
+            title="Fechar janela"
+            className="md-icon-btn"
+            style={{ color: ink, borderColor: isDark ? "rgba(255,255,255,.22)" : undefined, background: isDark ? "rgba(255,255,255,.12)" : undefined }}
+          >
+            ✕
+          </button>
+        ) : (
+          <button
+            onClick={() => onPopOut?.(note.id)}
+            title="Destacar em janela separada"
+            className="md-icon-btn"
+            style={{ color: ink, borderColor: isDark ? "rgba(255,255,255,.22)" : undefined, background: isDark ? "rgba(255,255,255,.12)" : undefined }}
+          >
+            Pop-out
+          </button>
+        )}
       </div>
 
       <div className="md-note-body">

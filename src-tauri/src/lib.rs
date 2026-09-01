@@ -5,7 +5,9 @@ pub mod window_service;
 
 use std::sync::Arc;
 
-use masterdesk_infrastructure::{NotificationService, SqliteNoteRepository, SqliteTaskRepository};
+use masterdesk_infrastructure::{
+    LocalAuthRepository, NotificationService, SqliteNoteRepository, SqliteTaskRepository,
+};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -95,18 +97,85 @@ pub fn run() {
                     )
                     .execute(&pool)
                     .await;
+
+                    let _ = sqlx::query(
+                        r#"
+                        CREATE TABLE IF NOT EXISTS users (
+                            id            TEXT PRIMARY KEY,
+                            username      TEXT NOT NULL COLLATE NOCASE UNIQUE CHECK (length(username) >= 3 AND length(username) <= 32),
+                            password_hash TEXT NOT NULL,
+                            created_at    TEXT NOT NULL
+                        )
+                        "#,
+                    )
+                    .execute(&pool)
+                    .await;
                 }
                 pool
             });
 
             let repo = Arc::new(SqliteNoteRepository::new(pool.clone()));
-            let task_repo = Arc::new(SqliteTaskRepository::new(pool));
+            let task_repo = Arc::new(SqliteTaskRepository::new(pool.clone()));
             let notification_service = Arc::new(NotificationService::new());
+            let auth_repo = Arc::new(LocalAuthRepository::new(pool));
             app.manage(commands::AppState {
                 repo,
                 task_repo,
                 notification_service,
+                auth_repo,
             });
+
+            // ---- System tray (Tauri 2 native) ----
+            let show_item = tauri::menu::MenuItemBuilder::with_id("show", "Mostrar MasterDesk")
+                .build(app)?;
+            let quit_item =
+                tauri::menu::MenuItemBuilder::with_id("quit", "Sair").build(app)?;
+            let menu = tauri::menu::MenuBuilder::new(app)
+                .item(&show_item)
+                .item(&quit_item)
+                .build()?;
+
+            let _tray = tauri::tray::TrayIconBuilder::new()
+                .icon(app.default_window_icon().cloned().unwrap_or_else(|| {
+                    // Fallback: cria ícone 1x1 transparente se não achar o default
+                    tauri::image::Image::new_owned(vec![0u8; 4], 1, 1)
+                }))
+                .menu(&menu)
+                .tooltip("MasterDesk")
+                .on_menu_event(move |app, event| match event.id().as_ref() {
+                    "show" => {
+                        if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.show();
+                            let _ = win.set_focus();
+                        }
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .build(app)?;
+
+            // ---- Close-to-tray: interceptar fechamento da janela principal ----
+            // Se houver notas em janelas dedicadas (pop-out), esconde em vez de
+            // sair — as notas continuam visíveis por cima de outros apps.
+            // Sem janelas de nota, o X fecha normalmente.
+            if let Some(main_win) = app.get_webview_window("main") {
+                let main_handle = main_win.as_ref().clone();
+                let app_for_check = app.handle().clone();
+                main_win.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        let has_note_windows = app_for_check
+                            .webview_windows()
+                            .keys()
+                            .any(|label| label.starts_with("note-"));
+                        if has_note_windows {
+                            api.prevent_close();
+                            let _ = main_handle.hide();
+                        }
+                    }
+                });
+            }
 
             Ok(())
         })
@@ -123,6 +192,12 @@ pub fn run() {
             commands::toggle_pin,
             commands::set_always_on_top,
             commands::set_window_always_on_top,
+            commands::open_note_window,
+            commands::close_note_window,
+            commands::set_note_window_always_on_top,
+            commands::set_note_window_position,
+            commands::set_note_window_size,
+            commands::is_note_window_open,
             commands::create_task,
             commands::get_task,
             commands::list_pending_tasks,
@@ -132,7 +207,11 @@ pub fn run() {
             commands::complete_task,
             commands::reopen_task,
             commands::delete_task,
-            commands::snooze_task
+            commands::snooze_task,
+            commands::auth_register,
+            commands::auth_login,
+            commands::auth_logout,
+            commands::auth_is_authenticated
         ])
         // .plugin(tauri_plugin_notification::init())                 // Fase 3 (ADR-004)
         .run(tauri::generate_context!())

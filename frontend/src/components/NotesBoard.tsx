@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import type { Note } from "../types";
 import * as api from "../api";
 import { NoteCard } from "./NoteCard";
@@ -12,6 +12,13 @@ export function NotesBoard() {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const titleRef = useRef<HTMLInputElement>(null);
+  const [poppedOut, setPoppedOut] = useState<Set<string>>(new Set());
+  const poppedOutRef = useRef<Set<string>>(new Set());
+
+  const setPoppedOutBoth = (next: Set<string>) => {
+    poppedOutRef.current = next;
+    setPoppedOut(next);
+  };
 
   const refresh = async () => {
     try {
@@ -19,6 +26,23 @@ export function NotesBoard() {
       setError(null);
       const data = showArchived ? await api.listArchivedNotes() : await api.listActiveNotes();
       setNotes(data);
+      // Reconcilia: remove do `poppedOut` janelas que já foram fechadas
+      // (ex.: fechadas pelo botão ✕ na própria janela ou pelo OS).
+      if (poppedOutRef.current.size > 0) {
+        const stillOpen: string[] = [];
+        for (const id of poppedOutRef.current) {
+          try {
+            if (await api.isNoteWindowOpen(id)) stillOpen.push(id);
+          } catch {
+            // se a checagem falhar, mantém o id (conservador)
+            stillOpen.push(id);
+          }
+        }
+        const next = new Set(stillOpen);
+        if (next.size !== poppedOutRef.current.size) {
+          setPoppedOutBoth(next);
+        }
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -30,6 +54,29 @@ export function NotesBoard() {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showArchived]);
+
+  // Quando a janela principal volta ao foco (ex.: restaurada da bandeja),
+  // reconcilia estado das janelas de nota abertas/fechadas.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const win = (await import("@tauri-apps/api/window")).getCurrentWindow();
+        const un = await win.onFocusChanged(({ payload }) => {
+          if (payload && !cancelled) refresh();
+        });
+        if (!cancelled) unlisten = un;
+      } catch {
+        // fora do Tauri (browser/dev puro) — ignora
+      }
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleCreate = async () => {
     if (!title.trim()) return;
@@ -105,7 +152,39 @@ export function NotesBoard() {
     }
   };
 
+  const handlePopOut = useCallback(async (id: string) => {
+    const target = notes.find((n) => n.id === id);
+    if (!target) return;
+    try {
+      await api.openNoteWindow(
+        target.id,
+        target.title,
+        target.color,
+        target.position[0],
+        target.position[1],
+        target.size[0],
+        target.size[1],
+      );
+      setPoppedOutBoth(new Set(poppedOutRef.current).add(id));
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [notes]);
+
+  const handleCloseWindow = useCallback(async (id: string) => {
+    try {
+      await api.closeNoteWindow(id);
+      const next = new Set(poppedOutRef.current);
+      next.delete(id);
+      setPoppedOutBoth(next);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, []);
+
   const filtered = notes.filter((n) => {
+    // Hide notes that are popped out into their own windows
+    if (poppedOut.has(n.id)) return false;
     if (!filter.trim()) return true;
     const q = filter.toLowerCase();
     return n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q) || n.tags.some((t) => t.includes(q));
@@ -221,6 +300,8 @@ export function NotesBoard() {
                   onDelete={handleDelete}
                   onTogglePin={handleTogglePin}
                   onToggleAot={handleToggleAot}
+                  onPopOut={handlePopOut}
+                  onCloseWindow={handleCloseWindow}
                 />
               ))}
             </div>

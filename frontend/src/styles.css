@@ -326,6 +326,34 @@ button:focus-visible, a:focus-visible{outline-offset:2px}
 /* Range */
 input[type="range"]{accent-color:var(--ink)}
 
+/* ---------------------------------------------------------------------------
+   Note-window mode (?note=<id>) — janela dedicada, fundo transparente
+--------------------------------------------------------------------------- */
+html.note-window-body, body.note-window-body{
+  background:transparent !important;
+  overflow:hidden;
+  height:100%;
+}
+.note-window-root{
+  width:100vw;
+  height:100vh;
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
+}
+.note-window-root .md-note--window{
+  box-shadow:none;
+  transition:none;
+}
+.note-window-root .md-note--window:hover{
+  box-shadow:none;
+}
+.note-window-root .md-note--window .md-note-head{
+  cursor:default;
+  background:rgba(15,17,21,.08);
+}
+.note-window-root .md-note--window .md-note-head:active{cursor:default}
+
 /* Responsivo 800x500 mínimo — garante uso em 1080x620 */
 @media (max-width:860px){
   .md-create-bar{padding:10px 12px}

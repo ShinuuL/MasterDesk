@@ -79,3 +79,24 @@ export interface UpdateTaskPayload {
   deadline?: string | null;
   reminder_thresholds?: number[];
 }
+
+// ---------------------------------------------------------------------------
+// Auth (Fase 4)
+// ---------------------------------------------------------------------------
+
+export interface AuthPayload {
+  id: string;
+  username: string;
+  created_at: string;
+  authenticated: boolean;
+}
+
+export interface RegisterPayload {
+  username: string;
+  password: string;
+}
+
+export interface LoginPayload {
+  username: string;
+  password: string;
+}

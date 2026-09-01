@@ -4,7 +4,7 @@
 
 use async_trait::async_trait;
 
-use crate::entities::{Note, NoteId, Task, TaskId};
+use crate::entities::{Note, NoteId, Task, TaskId, User};
 use crate::errors::DomainResult;
 
 #[async_trait]
@@ -50,9 +50,33 @@ pub trait WindowService: Send + Sync {
     fn set_position(&self, note_id: NoteId, x: f64, y: f64) -> DomainResult<()>;
 }
 
-/// Autenticação. Mecanismo real bloqueado até ADR-005 (Fase 4).
+/// Autenticação local (Fase 4) — isolada do Mastersys. O mecanismo externo de
+/// autenticação (Mastersys) entra na Fase 5 (ADR-006); este port permanece como
+/// contrato genérico e a implementação local é trocável.
+///
+/// Contrato (Fase 4):
+/// - `register`: cria um usuário local (senha é hasheada pela infraestrutura via
+///   Argon2 — o domínio não vê plaintext além da entrada).
+/// - `login`: verifica credenciais e abre sessão em memória.
+/// - `logout`: encerra a sessão.
+/// - `is_authenticated`: consulta se há sessão ativa.
+///
+/// A implementação decide a política de senha (Argon2) e o armazenamento; o
+/// domínio apenas valida formato de username/senha em `User`.
 #[async_trait]
 pub trait AuthenticationProvider: Send + Sync {
+    /// Registra um novo usuário local. Retorna `DomainError::Conflict` se o
+    /// username já existir.
+    async fn register(&self, username: &str, password: &str) -> DomainResult<User>;
+
+    /// Autentica um usuário. Retorna `DomainError::Unauthorized` para credenciais
+    /// inválidas.
+    async fn login(&self, username: &str, password: &str) -> DomainResult<User>;
+
+    /// Encerra a sessão atual (não-falha se não houver sessão).
+    async fn logout(&self) -> DomainResult<()>;
+
+    /// True se há uma sessão autenticada ativa em memória.
     async fn is_authenticated(&self) -> DomainResult<bool>;
 }
 

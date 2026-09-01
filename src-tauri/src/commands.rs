@@ -1,15 +1,20 @@
-//! Comandos Tauri para Notes (Fase 2) e Tasks (Fase 3).
+//! Comandos Tauri para Notes (Fase 2), Tasks (Fase 3) e Auth (Fase 4).
 //! Cada comando delega para `masterdesk-application::NoteService` / `TaskService`
-//! que orquestra validação de domínio + persistência via repositórios SQLite.
+//! / `AuthService` que orquestra validação de domínio + persistência.
 
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use masterdesk_application::{CreateNoteInput, CreateTaskInput, UpdateNoteInput, UpdateTaskInput};
+use masterdesk_application::{
+    AuthService, CreateNoteInput, CreateTaskInput, CreateUserInput, LoginInput, UpdateNoteInput,
+    UpdateTaskInput, UserView,
+};
 use masterdesk_domain::{Note, Priority, ReminderThreshold, Task};
-use masterdesk_infrastructure::{NotificationService, SqliteNoteRepository, SqliteTaskRepository};
+use masterdesk_infrastructure::{
+    LocalAuthRepository, NotificationService, SqliteNoteRepository, SqliteTaskRepository,
+};
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 // ---------------------------------------------------------------------------
 // Estado
@@ -19,6 +24,7 @@ pub struct AppState {
     pub repo: Arc<SqliteNoteRepository>,
     pub task_repo: Arc<SqliteTaskRepository>,
     pub notification_service: Arc<NotificationService>,
+    pub auth_repo: Arc<LocalAuthRepository>,
 }
 
 fn note_service(state: &State<'_, AppState>) -> masterdesk_application::NoteService {
@@ -34,6 +40,12 @@ fn task_service(state: &State<'_, AppState>) -> masterdesk_application::TaskServ
     let ns: Arc<dyn masterdesk_domain::ports::NotificationService> =
         state.notification_service.clone();
     masterdesk_application::TaskService::new(task_repo, Some(ns))
+}
+
+fn auth_service(state: &State<'_, AppState>) -> AuthService {
+    let provider: Arc<dyn masterdesk_domain::ports::AuthenticationProvider> =
+        state.auth_repo.clone();
+    AuthService::new(provider)
 }
 
 // ---------------------------------------------------------------------------
@@ -268,6 +280,121 @@ pub fn set_window_always_on_top(window: tauri::WebviewWindow, enabled: bool) -> 
 }
 
 // ---------------------------------------------------------------------------
+// Note window commands — "pinned notes" that survive main minimize
+// ---------------------------------------------------------------------------
+
+/// Abre uma janela dedicada para uma nota. Se já existir, foca ela.
+/// Assinatura definida no plano de pinned notes (id/title/color/x/y/w/h).
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub fn open_note_window(
+    app: tauri::AppHandle,
+    id: String,
+    title: String,
+    _color: String,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+) -> Result<(), String> {
+    let label = format!("note-{}", id);
+
+    // Se já existe, apenas foca
+    if let Some(existing) = app.get_webview_window(&label) {
+        existing.show().map_err(|e| e.to_string())?;
+        existing.set_focus().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    let url = WebviewUrl::App(format!("/?note={}", id).into());
+
+    let _win = WebviewWindowBuilder::new(&app, &label, url)
+        .title(&title)
+        .inner_size(w, h)
+        .position(x, y)
+        .resizable(true)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // `_color` é mantido no contrato para uso futuro (ex.: definir cor de fundo
+    // nativa da janela em plataformas que permitam). Hoje o frontend aplica a
+    // cor da nota via `?note=` + CSS, em janela transparente.
+    Ok(())
+}
+
+/// Fecha a janela de uma nota.
+#[tauri::command]
+pub fn close_note_window(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let label = format!("note-{}", id);
+    if let Some(win) = app.get_webview_window(&label) {
+        win.close().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Alterna always-on-top de uma janela de nota.
+#[tauri::command]
+pub fn set_note_window_always_on_top(
+    app: tauri::AppHandle,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let label = format!("note-{}", id);
+    if let Some(win) = app.get_webview_window(&label) {
+        win.set_always_on_top(enabled).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Move a janela de uma nota.
+#[tauri::command]
+pub fn set_note_window_position(
+    app: tauri::AppHandle,
+    id: String,
+    x: f64,
+    y: f64,
+) -> Result<(), String> {
+    let label = format!("note-{}", id);
+    if let Some(win) = app.get_webview_window(&label) {
+        use tauri::{LogicalPosition, Position};
+        win.set_position(Position::Logical(LogicalPosition { x, y }))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Redimensiona a janela de uma nota.
+#[tauri::command]
+pub fn set_note_window_size(
+    app: tauri::AppHandle,
+    id: String,
+    w: f64,
+    h: f64,
+) -> Result<(), String> {
+    let label = format!("note-{}", id);
+    if let Some(win) = app.get_webview_window(&label) {
+        use tauri::{LogicalSize, Size};
+        win.set_size(Size::Logical(LogicalSize {
+            width: w,
+            height: h,
+        }))
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Verifica se uma nota tem janela aberta.
+#[tauri::command]
+pub fn is_note_window_open(app: tauri::AppHandle, id: String) -> Result<bool, String> {
+    let label = format!("note-{}", id);
+    Ok(app.get_webview_window(&label).is_some())
+}
+
+// ---------------------------------------------------------------------------
 // Task commands (Fase 3)
 // ---------------------------------------------------------------------------
 
@@ -368,4 +495,84 @@ pub async fn snooze_task(state: State<'_, AppState>, id: String) -> Result<(), S
     let svc = task_service(&state);
     let uid = id.parse::<uuid::Uuid>().map_err(|e| e.to_string())?;
     svc.snooze_task(uid).await.map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Auth commands (Fase 4) — autenticação local isolada
+// ---------------------------------------------------------------------------
+
+/// Resposta de auth enviada ao frontend. **Nunca** inclui `password_hash`.
+#[derive(Debug, Serialize)]
+pub struct AuthPayload {
+    pub id: String,
+    pub username: String,
+    pub created_at: String,
+    pub authenticated: bool,
+}
+
+impl From<UserView> for AuthPayload {
+    fn from(v: UserView) -> Self {
+        Self {
+            id: v.id.to_string(),
+            username: v.username,
+            created_at: v.created_at.to_rfc3339(),
+            authenticated: true,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RegisterPayload {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LoginPayload {
+    pub username: String,
+    pub password: String,
+}
+
+#[tauri::command]
+pub async fn auth_register(
+    state: State<'_, AppState>,
+    payload: RegisterPayload,
+) -> Result<AuthPayload, String> {
+    let svc = auth_service(&state);
+    let res = svc
+        .register(CreateUserInput {
+            username: payload.username,
+            password: payload.password,
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(AuthPayload::from(res.user))
+}
+
+#[tauri::command]
+pub async fn auth_login(
+    state: State<'_, AppState>,
+    payload: LoginPayload,
+) -> Result<AuthPayload, String> {
+    let svc = auth_service(&state);
+    let res = svc
+        .login(LoginInput {
+            username: payload.username,
+            password: payload.password,
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(AuthPayload::from(res.user))
+}
+
+#[tauri::command]
+pub async fn auth_logout(state: State<'_, AppState>) -> Result<(), String> {
+    let svc = auth_service(&state);
+    svc.logout().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn auth_is_authenticated(state: State<'_, AppState>) -> Result<bool, String> {
+    let svc = auth_service(&state);
+    svc.is_authenticated().await.map_err(|e| e.to_string())
 }
