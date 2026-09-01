@@ -285,9 +285,14 @@ pub fn set_window_always_on_top(window: tauri::WebviewWindow, enabled: bool) -> 
 
 /// Abre uma janela dedicada para uma nota. Se já existir, foca ela.
 /// Assinatura definida no plano de pinned notes (id/title/color/x/y/w/h).
+///
+/// P1 — `async` é OBRIGATÓRIO aqui: em Windows, `WebviewWindowBuilder::new`/
+/// `build()` deadlocka quando usado em comando síncrono (docs.rs Known issues +
+/// tauri#13963 / wry#583). Comando async roda no runtime tokio, e o build é
+/// despachado para o thread principal sem bloquear o event loop.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
-pub fn open_note_window(
+pub async fn open_note_window(
     app: tauri::AppHandle,
     id: String,
     title: String,
@@ -310,45 +315,74 @@ pub fn open_note_window(
         "open_note_window: id={} title={} x={} y={} w={} h={}",
         id, title, x, y, w, h
     );
-    // Dev: Vite em http://localhost:1420 precisa de URL externa explícita;
-    // Prod: tauri://loader serve index.html via App. Usar hash (#) garante
-    // que o path "/" ou "/index.html" seja resolvido para index.html em ambos.
+
+    // P2 — URL UNIFICADA via WebviewUrl::App em dev E prod (removido o
+    // cfg!(debug_assertions) com External). Em dev o App resolve para
+    // `devUrl` (http://localhost:1420/index.html#note=<id>); em prod para
+    // `frontendDist` (tauri://index.html#note=<id>). Unificar garante que a
+    // `initialization_script` (window.__NOTE_ID__) rode: no Windows a
+    // initialization_script NÃO roda em WebviewUrl::External (wry/tauri).
     // App.tsx já lê search + hash + window.__NOTE_ID__ (fallback).
-    let url = if cfg!(debug_assertions) {
-        // Em dev, forçar http para o Vite (App via tauri:// falha se Vite não servir #)
-        WebviewUrl::External(
-            format!("http://localhost:1420/index.html#note={}", id)
-                .parse()
-                .unwrap(),
-        )
-    } else {
-        WebviewUrl::App(format!("/index.html#note={}", id).into())
-    };
+    let url = WebviewUrl::App(format!("/index.html#note={}", id).into());
     println!("open_note_window url: {:?}", url);
 
-    let _win = WebviewWindowBuilder::new(&app, &label, url)
+    // Sanitiza o id para o initialization_script: serde_json::to_string produz
+    // um literal de string JS válido e escapado — evita quebra de script / XSS
+    // via aspas, backslash ou template literals no id.
+    let id_literal = serde_json::to_string(&id).unwrap_or_else(|_| "\"\"".to_string());
+
+    // Clampar posição/tamanho: impede abrir a janela fora da área de trabalho
+    // se uma posição inválida ficou persistida (ex.: monitor removido).
+    const MAX_COORD: f64 = 4096.0;
+    const MIN_W: f64 = 180.0;
+    const MIN_H: f64 = 140.0;
+    let x = x.clamp(0.0, MAX_COORD);
+    let y = y.clamp(0.0, MAX_COORD);
+    let w = w.clamp(MIN_W, MAX_COORD);
+    let h = h.clamp(MIN_H, MAX_COORD);
+
+    let win = WebviewWindowBuilder::new(&app, &label, url)
         .title(&title)
         .inner_size(w, h)
         .position(x, y)
         .resizable(true)
+        // P3 — estratégia escolhida: manter janela OPAQUE (transparent(false))
+        // e REMOVER `html.note-window-body{background:transparent}` do
+        // styles.css. `decorations(true)` mantém moldura nativa (drag/resize/X).
+        // `visible(false)` + `show()` após o build evita o flash branco ao
+        // abrir (Issues #14831/14515/8308). Nota: no Windows `shadow(false)`
+        // não tem efeito em janela decorada (sombras sempre ON) — mantido por
+        // consistência cross-platform.
         .decorations(true)
         .transparent(false)
+        .shadow(false)
+        // always_on_top: janela de nota é on-top por padrão (pin). O estado
+        // persistido `note.always_on_top` é aplicado pelo frontend via
+        // `set_note_window_always_on_top` quando o usuário alterna o toggle.
         .always_on_top(true)
         .skip_taskbar(false)
-        .visible(true)
-        .initialization_script(&format!("window.__NOTE_ID__='{}';console.log('note-window init', window.__NOTE_ID__, location.href);", id))
+        .visible(false)
+        .initialization_script(format!(
+            "window.__NOTE_ID__={id_literal};console.log('note-window init', window.__NOTE_ID__, location.href);"
+        ))
         .build()
         .map_err(|e| e.to_string())?;
 
+    // Mostra apenas depois do build concluído (init script já registrado),
+    // reduzindo o flash branco de "pop-out".
+    win.show().map_err(|e| e.to_string())?;
+
     // `_color` é mantido no contrato para uso futuro (ex.: definir cor de fundo
     // nativa da janela em plataformas que permitam). Hoje o frontend aplica a
-    // cor da nota via `?note=` + CSS, em janela transparente.
+    // cor da nota via `?note=` + CSS.
     Ok(())
 }
 
 /// Fecha a janela de uma nota.
+/// `async` (P1): operações de janela não devem bloquear o thread principal em
+/// Windows (mesmo risco de deadlock de `WebviewWindowBuilder::new`).
 #[tauri::command]
-pub fn close_note_window(app: tauri::AppHandle, id: String) -> Result<(), String> {
+pub async fn close_note_window(app: tauri::AppHandle, id: String) -> Result<(), String> {
     let label = format!("note-{}", id);
     if let Some(win) = app.get_webview_window(&label) {
         win.close().map_err(|e| e.to_string())?;
@@ -357,8 +391,9 @@ pub fn close_note_window(app: tauri::AppHandle, id: String) -> Result<(), String
 }
 
 /// Alterna always-on-top de uma janela de nota.
+/// `async` (P1): ver `close_note_window`.
 #[tauri::command]
-pub fn set_note_window_always_on_top(
+pub async fn set_note_window_always_on_top(
     app: tauri::AppHandle,
     id: String,
     enabled: bool,
@@ -371,8 +406,9 @@ pub fn set_note_window_always_on_top(
 }
 
 /// Move a janela de uma nota.
+/// `async` (P1): ver `close_note_window`.
 #[tauri::command]
-pub fn set_note_window_position(
+pub async fn set_note_window_position(
     app: tauri::AppHandle,
     id: String,
     x: f64,
@@ -388,8 +424,9 @@ pub fn set_note_window_position(
 }
 
 /// Redimensiona a janela de uma nota.
+/// `async` (P1): ver `close_note_window`.
 #[tauri::command]
-pub fn set_note_window_size(
+pub async fn set_note_window_size(
     app: tauri::AppHandle,
     id: String,
     w: f64,

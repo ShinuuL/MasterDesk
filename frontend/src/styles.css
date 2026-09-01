@@ -327,13 +327,11 @@ button:focus-visible, a:focus-visible{outline-offset:2px}
 input[type="range"]{accent-color:var(--ink)}
 
 /* ---------------------------------------------------------------------------
-   Note-window mode (?note=<id>) — janela dedicada, fundo transparente
+   Note-window mode (?note=<id>) — janela dedicada.
+   P3: estratégia OPAQUE — a janela de nota usa `transparent(false)` (Rust), por
+   isso o fundo transparente foi REMOVIDO daqui. `html/body{height:100%}`
+   global + `.note-window-root{100vw/100vh}` garantem layout sem scroll.
 --------------------------------------------------------------------------- */
-html.note-window-body, body.note-window-body{
-  background:transparent !important;
-  overflow:hidden;
-  height:100%;
-}
 .note-window-root{
   width:100vw;
   height:100vh;
