@@ -152,7 +152,13 @@ function NoteWindowApp({ noteId }: { noteId: string }) {
     try {
       await api.closeNoteWindow(noteId);
     } catch (e) {
-      setError(String(e));
+      console.error("closeNoteWindow falhou:", e);
+    }
+    try {
+      const w = (await import("@tauri-apps/api/window")).getCurrentWindow();
+      await w.close();
+    } catch {
+      window.close();
     }
   };
 
@@ -198,19 +204,38 @@ function NoteWindowApp({ noteId }: { noteId: string }) {
 
   if (loading) {
     return (
-      <div className="note-window-root" style={{ display: "grid", placeItems: "center" }}>
-        <div className="md-skeleton" style={{ width: 260 }} />
+      <div className="note-window-root" style={{ display: "grid", placeItems: "center", background: "#fff", padding: 16 }}>
+        <div style={{ fontSize: 13, color: "#6B7280" }}>Carregando nota {noteId.slice(0, 8)}...</div>
+        <div className="md-skeleton" style={{ width: 260, marginTop: 12 }} />
+        <button
+          onClick={async () => {
+            try { await api.closeNoteWindow(noteId); } catch {}
+            try { const w = (await import("@tauri-apps/api/window")).getCurrentWindow(); await w.close(); } catch {}
+          }}
+          style={{ marginTop: 12, padding: "6px 12px", borderRadius: 999, border: "1px solid #E8E6E1", background: "#fff" }}
+        >
+          Fechar
+        </button>
       </div>
     );
   }
 
   if (!note || error) {
     return (
-      <div className="note-window-root" role="alert">
-        <div style={{ padding: "14px", fontSize: 13 }}>
-          <strong style={{ fontWeight: 700 }}>Não foi possível carregar a nota:</strong>{" "}
-          {error ?? "nota não encontrada"}
+      <div className="note-window-root" role="alert" style={{ background: "#fff", padding: 16 }}>
+        <div style={{ padding: "14px", fontSize: 13, background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10 }}>
+          <strong style={{ fontWeight: 700 }}>Não foi possível carregar a nota:</strong> {error ?? "nota não encontrada"}
+          <div style={{ fontSize: 11, color: "#6B7280", marginTop: 6, wordBreak: "break-all" }}>ID: {noteId}</div>
         </div>
+        <button
+          onClick={async () => {
+            try { await api.closeNoteWindow(noteId); } catch {}
+            try { const w = (await import("@tauri-apps/api/window")).getCurrentWindow(); await w.close(); } catch { window.close(); }
+          }}
+          style={{ marginTop: 12, padding: "6px 12px", borderRadius: 999, border: "1px solid #E8E6E1", background: "#fff" }}
+        >
+          Fechar janela
+        </button>
       </div>
     );
   }
