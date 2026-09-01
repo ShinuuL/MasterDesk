@@ -20,11 +20,18 @@ pub fn run() {
                 .unwrap_or_else(|_| std::path::PathBuf::from("."));
             std::fs::create_dir_all(&resource_dir).ok();
             let db_path = resource_dir.join("masterdesk.db");
-            let db_url = format!("sqlite://{}?create_if_missing=true", db_path.display());
 
             // Block_on para criar pool síncrono no setup (Tauri setup é síncrono)
             let pool = tauri::async_runtime::block_on(async {
-                let pool = sqlx::SqlitePool::connect(&db_url)
+                use sqlx::sqlite::SqliteConnectOptions;
+                // Caminho Windows com backslashes não funciona como URL `sqlite://...`;
+                // usar SqliteConnectOptions::filename lida corretamente com qualquer OS
+                // e evita o panic "unknown query parameter `create_if_missing`" que fazia
+                // o app abrir e fechar instantaneamente em release.
+                let opts = SqliteConnectOptions::new()
+                    .filename(&db_path)
+                    .create_if_missing(true);
+                let pool = sqlx::SqlitePool::connect_with(opts)
                     .await
                     .expect("failed to connect sqlite");
                 // Garante schema — tenta migrations se o diretório existir, senão cria inline.
