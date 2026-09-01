@@ -183,6 +183,27 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
               </button>
             );
           })}
+          <label
+            title="Cor personalizada"
+            aria-label="Cor personalizada"
+            style={{
+              width:20, height:20, borderRadius:"50%",
+              background:"conic-gradient(from 0deg, #f44336, #ffeb3b, #8bc34a, #03a9f4, #9c27b0, #f44336)",
+              border: !COLORS.includes(note.color as typeof COLORS[number]) ? "2.5px solid #0F1115" : "1px solid rgba(15,17,21,.18)",
+              cursor:"pointer",
+              boxShadow: !COLORS.includes(note.color as typeof COLORS[number]) ? "0 0 0 2px rgba(15,17,21,.08)" : "0 1px 2px rgba(0,0,0,.08)",
+              display:"grid", placeItems:"center",
+              position:"relative", overflow:"hidden",
+            }}
+          >
+            <span aria-hidden style={{ fontSize:10, lineHeight:1, fontWeight:800, background:"white", borderRadius:"50%", width:10, height:10, display:"grid", placeItems:"center", border:"1px solid rgba(15,17,21,.12)" }}>+</span>
+            <input
+              type="color"
+              value={/^#[0-9a-fA-F]{6}$/.test(note.color) ? note.color : "#FFEB3B"}
+              onInput={(e) => onUpdate(note.id, { color: (e.target as HTMLInputElement).value })}
+              style={{ position:"absolute", inset:0, opacity:0, cursor:"pointer", width:"100%", height:"100%" }}
+            />
+          </label>
         </div>
 
         <label style={{ fontSize:11, fontWeight:600, letterSpacing:".04em", textTransform:"uppercase", opacity:.75, display:"flex", alignItems:"center", gap:7, flexWrap:"wrap" }}>
