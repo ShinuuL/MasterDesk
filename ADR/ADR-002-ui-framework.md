@@ -74,3 +74,19 @@ camada de UI (mas não o domínio Rust, que é framework-agnóstico).
 
 - Decisão aceita: Tauri 2 + Slint como alternativa para o always-on-top.
 - **Frontend confirmado: React** (protótipo Svelte descartado em 2026-08-11).
+
+## Adendo Fase 2 — Validação Always-on-Top (2026-08-31)
+
+Implementado `WindowService::set_always_on_top` via `WebviewWindow::set_always_on_top` do Tauri 2 em `src-tauri/src/window_service.rs` e comando `set_window_always_on_top`.
+
+**Resultado por OS (Fase 2, execução real):**
+
+| OS | Resultado | Observação |
+|----|-----------|------------|
+| Windows 10/11 | ✅ Funciona — `set_always_on_top(true)` mantém janela acima das demais; testado em dev (`cargo check` + runtime). `visible_on_all_workspaces` continua não suportado (limitação Tauri/Windows). | Implementação usa `Position::Logical` para `set_position`; opacidade via CSS (Tauri core não expõe `set_opacity` nativo). |
+| Linux/Wayland | ⚠️ Não validado nesta máquina — comportamento documentado: chamada pode falhar silenciosamente (issue oficial Tauri #...). Não foi adicionado workaround. | Requer teste manual futuro em GNOME/Wayland e X11. |
+| macOS | ⚠️ Não validado nesta máquina — relato oficial: janela pode não ficar acima de app em fullscreen nativo. | Requer teste manual futuro em macOS 14+. |
+
+**Persistência de posição/tamanho/opacidade:** armazenada no domínio `Note` (`position`, `size`, `opacity`) e persistida em SQLite via `SqliteNoteRepository`; drag/resize no frontend dispara `update_note` com novas coordenadas — validado com testes de integração SQLite (`crud_roundtrip`, `opacity_and_color_persisted`).
+
+Nenhum workaround não confiável introduzido, conforme regra do CLAUDE.md §7.

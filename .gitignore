@@ -19,3 +19,8 @@ Thumbs.db
 
 # Tauri
 src-tauri/target/
+src-tauri/gen/
+
+# Generated JS next to TS (tsc emit) — should go to dist/
+frontend/src/*.js
+frontend/src/**/*.js

@@ -12,6 +12,8 @@ pub trait NoteRepository: Send + Sync {
     async fn save(&self, note: &Note) -> DomainResult<()>;
     async fn find_by_id(&self, id: NoteId) -> DomainResult<Option<Note>>;
     async fn list_active(&self) -> DomainResult<Vec<Note>>;
+    async fn list_archived(&self) -> DomainResult<Vec<Note>>;
+    async fn list_all(&self) -> DomainResult<Vec<Note>>;
     async fn delete(&self, id: NoteId) -> DomainResult<()>;
 }
 
@@ -20,6 +22,9 @@ pub trait TaskRepository: Send + Sync {
     async fn save(&self, task: &Task) -> DomainResult<()>;
     async fn find_by_id(&self, id: TaskId) -> DomainResult<Option<Task>>;
     async fn list_pending(&self) -> DomainResult<Vec<Task>>;
+    async fn list_completed(&self) -> DomainResult<Vec<Task>>;
+    async fn list_all(&self) -> DomainResult<Vec<Task>>;
+    async fn list_overdue(&self) -> DomainResult<Vec<Task>>;
     async fn delete(&self, id: TaskId) -> DomainResult<()>;
 }
 
@@ -28,7 +33,11 @@ pub trait TaskRepository: Send + Sync {
 /// domínio não sabe disso.
 #[async_trait]
 pub trait NotificationService: Send + Sync {
-    async fn schedule_reminder(&self, task_id: TaskId, fire_at: chrono::DateTime<chrono::Utc>) -> DomainResult<()>;
+    async fn schedule_reminder(
+        &self,
+        task_id: TaskId,
+        fire_at: chrono::DateTime<chrono::Utc>,
+    ) -> DomainResult<()>;
     async fn cancel_reminder(&self, task_id: TaskId) -> DomainResult<()>;
     async fn snooze(&self, task_id: TaskId, minutes: u32) -> DomainResult<()>;
 }

@@ -9,8 +9,10 @@ license.workspace = true
 [dependencies]
 masterdesk-domain = { path = "../domain" }
 async-trait = { workspace = true }
-
-# sqlx entra de fato quando a migration real da Fase 2 for implementada.
-# Deixado comentado propositalmente na Fase 1 para não travar o `cargo check`
-# neste ambiente sandbox sem acesso a um banco/feature flags configurados.
-# sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "chrono", "uuid", "json"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

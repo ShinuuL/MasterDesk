@@ -30,26 +30,20 @@ sem features de domínio ainda.
   comunitário de notificação — não bloqueia o setup, mas deve ser entregue nesta
   fase, antes da Fase 3.
 
-**Dev 1 — Scaffold Rust/Tauri**
+**Objetivos:**
 - `cargo tauri init`, estrutura de crates (`domain`, `application`, `infrastructure`, `app` do Tauri).
 - Configurar workspace Cargo (múltiplos crates) respeitando a seção 4 do CLAUDE.md.
 - Setup de `sqlx` + `tauri-plugin-sql` com uma migration vazia de teste (valida ADR-003 na prática).
-
-**Dev 2 — Frontend + validação React vs Svelte (item pendente do ADR-002)**
 - Prototipar uma tela mínima (uma nota estática) em React e em Svelte.
 - Levar os dois protótipos + mockups para validação com o DEV.
 - Só depois de aprovado: fechar definitivamente o frontend e remover a opção descartada.
 - Setup de build (Vite) integrado ao `tauri dev`/`tauri build`.
-
-**Dev 3 — Notificações: pesquisa aprofundada pendente do ADR-004**
 - Comparar em profundidade `tauri-plugin-notification` (código próprio por cima)
   vs. o fork comunitário `tauri-plugin-notifications` (agendamento embutido).
 - Critérios: manutenção, testabilidade do `NotificationService`, dependência de
   push/FCM/APNs (fora de escopo atual).
 - Entregar adendo ao ADR-004 com a conclusão — não implementar notificações ainda
   (isso é Fase 3).
-
-**Dev 4 — CI/CD e arquitetura**
 - Pipeline CI: `cargo check`, `cargo test`, `cargo clippy`, lint do frontend, build Tauri.
 - Esqueleto das interfaces/ports citadas na seção 4 do CLAUDE.md (`NoteRepository`,
   `TaskRepository`, `NotificationService`, `WindowService`, `AuthenticationProvider`,
@@ -62,28 +56,25 @@ domínio criadas, migration de teste rodando local.
 
 ---
 
-## Fase 2 — Local Notes
+## Fase 2 — Local Notes ✅ Concluída (2026-08-31)
 
 Branch sugerida: `feature/phase2-local-notes`
 Pré-requisito: Fase 1 "pronta" conforme critério acima.
 
-**Dev 1 — Domínio de Notes**
+> CRUD de notas implementado, persistência SQLite via sqlx funcionando,
+> always-on-top validado em Windows (Linux e macOS documentados em ADR-002 addendum).
+
+**Objetivos:**
 - Modelar `Note` (title, content, tags, priority, color, size, position, opacity,
   pinning, archive) como tipos fortes no domínio (seção 6 do CLAUDE.md).
 - Casos de uso: criar, editar, arquivar, deletar, fixar nota.
 - Testes unitários do domínio (Rule 19).
-
-**Dev 2 — UI de Notes**
 - Componente de nota (sticky note) com os atributos visuais do domínio.
 - Editor de conteúdo, seletor de cor, controle de opacidade.
 - Drag/resize/position persistidos.
-
-**Dev 3 — Persistência de Notes**
 - Implementar `NoteRepository` com `sqlx` sobre SQLite (ADR-003).
 - Migration real de `notes` (schema completo com os campos da seção 6).
 - Testes de persistência (Rule 19: "Persistence" está explicitamente na lista).
-
-**Dev 4 — Always-on-top (validação real, não assumida)**
 - Implementar `WindowService.set_always_on_top` via API do Tauri.
 - **Testar manualmente em Windows, macOS e Linux/Wayland/X11** — a limitação
   documentada no ADR-002 precisa virar um resultado real (funciona/não funciona
@@ -95,25 +86,19 @@ com always-on-top testado (não só compilado) nos 3 OS.
 
 ---
 
-## Fase 3 — Tasks, Deadlines & Notificações
+## Fase 3 — Tasks, Deadlines & Notificações 🔄 Próxima / Em preparação
 
 Branch sugerida: `feature/phase3-tasks-notifications`
-Pré-requisito: Fase 2 pronta + conclusão da pesquisa de notificação (Fase 1, Dev 3).
+Pré-requisito: Fase 2 pronta + conclusão da pesquisa de notificação (Fase 1).
 
-**Dev 1 — Domínio de Tasks/Deadlines**
+**Objetivos:**
 - Modelar `Task`, cálculo de deadline, thresholds configuráveis (5m/10m/.../custom).
 - Testes de cálculo de deadline e de lembrete (Rule 19, itens explícitos).
-
-**Dev 2 — UI de Tasks e configuração de lembretes**
 - Tela/lista de tasks, indicadores visuais de deadline próximo.
 - UI de configuração de thresholds de notificação.
-
-**Dev 3 — `NotificationService` + `TaskRepository`**
 - Implementar a decisão final do adendo ao ADR-004 (Fase 1).
 - Agendamento, repetição, snooze como lógica própria sobre o plugin escolhido.
 - `TaskRepository` via sqlx, migration de `tasks`.
-
-**Dev 4 — Validação cross-platform de notificações**
 - Testar permissões de notificação em Windows/macOS/Linux (comportamento difere
   por OS, conforme já sinalizado no ADR-004).
 - Documentar resultado real por OS.
@@ -146,10 +131,11 @@ executa efeitos colaterais externos sem autorização explícita futura.
 Branch sugerida: `feature/phase7-mobile`
 Pré-requisito: Fases 1–3 validadas em desktop (mínimo).
 
-**Dev 1** — `tauri ios init` / `tauri android init`, build Rust como lib estática.
-**Dev 2** — Adaptar frontend para layout mobile (visualização/acesso, não paridade).
-**Dev 3** — Validar individualmente cada plugin em iOS/Android (SQL, notificação, window) — nenhum plugin é assumido funcional sem teste.
-**Dev 4** — CI macOS para build iOS (Xcode) + toolchain Android (Gradle/NDK).
+**Objetivos:**
+- `tauri ios init` / `tauri android init`, build Rust como lib estática.
+- Adaptar frontend para layout mobile (visualização/acesso, não paridade).
+- Validar individualmente cada plugin em iOS/Android (SQL, notificação, window) — nenhum plugin é assumido funcional sem teste.
+- CI macOS para build iOS (Xcode) + toolchain Android (Gradle/NDK).
 
 ---
 
