@@ -74,7 +74,6 @@ function NoteWindowApp({ noteId }: { noteId: string }) {
   const [note, setNote] = useState<Note | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [debugHref] = useState(() => window.location.href);
 
   // Janela de nota: fundo transparente e sem scroll no html/body
   useEffect(() => {
@@ -230,73 +229,47 @@ function NoteWindowApp({ noteId }: { noteId: string }) {
     }
   };
 
-  // Debug banner sempre visível — confirma que React montou
-  const DebugBanner = (
-    <div style={{ background: "#0F1115", color: "#FFEB3B", padding: "6px 8px", fontSize: 11, fontFamily: "monospace", wordBreak: "break-all" }}>
-      DBG href={debugHref} | noteId={noteId} | loading={String(loading)} | error={error ?? "null"} | note={note ? note.title : "null"}
-    </div>
-  );
-
   if (loading) {
     return (
-      <div className="note-window-root" style={{ display: "flex", flexDirection: "column", background: "#fff" }}>
-        {DebugBanner}
-        <div style={{ display: "grid", placeItems: "center", flex: 1, padding: 16 }}>
-          <div style={{ fontSize: 13, color: "#6B7280" }}>Carregando nota {noteId.slice(0, 8)}...</div>
-          <div className="md-skeleton" style={{ width: 260, marginTop: 12 }} />
-          <button
-            onClick={async () => {
-              try { await api.closeNoteWindow(noteId); } catch {}
-              try { const w = (await import("@tauri-apps/api/window")).getCurrentWindow(); await w.close(); } catch {}
-            }}
-            style={{ marginTop: 12, padding: "6px 12px", borderRadius: 999, border: "1px solid #E8E6E1", background: "#fff" }}
-          >
-            Fechar
-          </button>
-        </div>
+      <div className="note-window-root" style={{ display: "grid", placeItems: "center", background: "#fff", padding: 16 }}>
+        <div style={{ fontSize: 13, color: "#6B7280" }}>Carregando nota {noteId.slice(0, 8)}...</div>
+        <div className="md-skeleton" style={{ width: 260, marginTop: 12 }} />
       </div>
     );
   }
 
   if (!note || error) {
     return (
-      <div className="note-window-root" role="alert" style={{ background: "#fff", display: "flex", flexDirection: "column" }}>
-        {DebugBanner}
-        <div style={{ padding: 16, flex: 1 }}>
-          <div style={{ padding: "14px", fontSize: 13, background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10 }}>
-            <strong style={{ fontWeight: 700 }}>Não foi possível carregar a nota:</strong> {error ?? "nota não encontrada"}
-            <div style={{ fontSize: 11, color: "#6B7280", marginTop: 6, wordBreak: "break-all" }}>ID: {noteId}</div>
-            <div style={{ fontSize: 11, color: "#6B7280" }}>href: {debugHref}</div>
-          </div>
-          <button
-            onClick={async () => {
-              try { await api.closeNoteWindow(noteId); } catch {}
-              try { const w = (await import("@tauri-apps/api/window")).getCurrentWindow(); await w.close(); } catch { window.close(); }
-            }}
-            style={{ marginTop: 12, padding: "6px 12px", borderRadius: 999, border: "1px solid #E8E6E1", background: "#fff" }}
-          >
-            Fechar janela
-          </button>
+      <div className="note-window-root" role="alert" style={{ background: "#fff", padding: 16 }}>
+        <div style={{ padding: "14px", fontSize: 13, background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10 }}>
+          <strong style={{ fontWeight: 700 }}>Não foi possível carregar a nota:</strong> {error ?? "nota não encontrada"}
+          <div style={{ fontSize: 11, color: "#6B7280", marginTop: 6, wordBreak: "break-all" }}>ID: {noteId}</div>
         </div>
+        <button
+          onClick={async () => {
+            try { await api.closeNoteWindow(noteId); } catch {}
+            try { const w = (await import("@tauri-apps/api/window")).getCurrentWindow(); await w.close(); } catch { window.close(); }
+          }}
+          style={{ marginTop: 12, padding: "6px 12px", borderRadius: 999, border: "1px solid #E8E6E1", background: "#fff" }}
+        >
+          Fechar janela
+        </button>
       </div>
     );
   }
 
   return (
-    <div className="note-window-root" style={{ display: "flex", flexDirection: "column", background: "#fff" }}>
-      {DebugBanner}
-      <div style={{ flex: 1, display: "flex" }}>
-        <NoteCard
-          note={note}
-          noteWindowMode
-          onUpdate={handleUpdate}
-          onArchive={handleArchive}
-          onDelete={handleDelete}
-          onTogglePin={handleTogglePin}
-          onToggleAot={handleToggleAot}
-          onCloseWindow={handleCloseWindow}
-        />
-      </div>
+    <div className="note-window-root">
+      <NoteCard
+        note={note}
+        noteWindowMode
+        onUpdate={handleUpdate}
+        onArchive={handleArchive}
+        onDelete={handleDelete}
+        onTogglePin={handleTogglePin}
+        onToggleAot={handleToggleAot}
+        onCloseWindow={handleCloseWindow}
+      />
     </div>
   );
 }
