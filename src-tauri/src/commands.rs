@@ -310,10 +310,12 @@ pub fn open_note_window(
         "open_note_window: id={} title={} x={} y={} w={} h={}",
         id, title, x, y, w, h
     );
-    // Em dev: http://localhost:1420/#note=id | Em prod: tauri://localhost/#note=id
-    // Hash (#) garante que o loader serve index.html (path "/") e o JS lê via App.tsx
-    // que já checa search + hash. Query (?note=) falhava em release (resource lookup).
-    let url = WebviewUrl::App(format!("/#note={}", id).into());
+    // Em dev: http://localhost:1420/index.html#note=id | Em prod: tauri://localhost/index.html#note=id
+    // Usar /index.html explícito + hash (#) garante que tanto Vite (dev) quanto o
+    // loader de recursos do Tauri (release) sirvam index.html. A query ?note= falhava
+    // em release porque o custom protocol tentava resolver "/?note=id" como arquivo.
+    // Hash é client-side only e App.tsx já lê search + hash (debug log href).
+    let url = WebviewUrl::App(format!("/index.html#note={}", id).into());
     println!("open_note_window url: {:?}", url);
 
     let _win = WebviewWindowBuilder::new(&app, &label, url)
