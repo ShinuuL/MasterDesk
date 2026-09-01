@@ -47,18 +47,31 @@ function NoteWindowApp({ noteId }: { noteId: string }) {
 
   useEffect(() => {
     let cancelled = false;
+    const timeout = setTimeout(() => {
+      if (!cancelled && loading) {
+        setError("timeout ao carregar nota (backend não respondeu em 5s)");
+        setLoading(false);
+      }
+    }, 5000);
     (async () => {
       try {
+        console.log("NoteWindow: fetching", noteId);
         const n = await api.getNote(noteId);
+        console.log("NoteWindow: got", n);
         if (!cancelled) setNote(n);
       } catch (e) {
+        console.error("getNote falhou:", e);
         if (!cancelled) setError(String(e));
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          clearTimeout(timeout);
+          setLoading(false);
+        }
       }
     })();
     return () => {
       cancelled = true;
+      clearTimeout(timeout);
     };
   }, [noteId]);
 
@@ -212,22 +225,37 @@ function MainApp() {
 
   useEffect(() => {
     let cancelled = false;
+    const timeout = setTimeout(() => {
+      if (!cancelled) {
+        console.warn("authIsAuthenticated timeout — fallback para AuthPanel");
+        setAuthLoading(false);
+      }
+    }, 3000);
     (async () => {
       try {
         const authed = await api.authIsAuthenticated();
         if (!cancelled) {
-          // Se o backend tem sessão ativa mas ainda não sabemos quem é,
-          // deixamos o AuthPanel decidir (o payload de login/register traz o usuário).
           if (!authed) setAuthUser(null);
+          else {
+            // Sessão válida mas sem detalhe de usuário — tenta restaurar via login é necessário?
+            // Mostra AuthPanel para login; se houver sessão, o backend já permite operações.
+            // Para evitar tela vazia, mantém null até login mas sai do loading.
+            setAuthUser(null);
+          }
         }
-      } catch {
+      } catch (e) {
+        console.error("authIsAuthenticated falhou:", e);
         if (!cancelled) setAuthUser(null);
       } finally {
-        if (!cancelled) setAuthLoading(false);
+        if (!cancelled) {
+          clearTimeout(timeout);
+          setAuthLoading(false);
+        }
       }
     })();
     return () => {
       cancelled = true;
+      clearTimeout(timeout);
     };
   }, []);
 
