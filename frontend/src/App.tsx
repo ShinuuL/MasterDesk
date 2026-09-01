@@ -12,8 +12,21 @@ export default function App() {
   const [noteParam, setNoteParam] = useState<string | null>(null);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const n = params.get("note");
+    // Suporta tanto search (?note=) quanto hash (#?note=) e tauri:// scheme
+    const href = window.location.href;
+    let n: string | null = null;
+    try {
+      const url = new URL(href);
+      n = url.searchParams.get("note");
+      if (!n && url.hash.includes("note=")) {
+        const hashParams = new URLSearchParams(url.hash.replace(/^#\/?/, ""));
+        n = hashParams.get("note");
+      }
+    } catch {
+      const params = new URLSearchParams(window.location.search);
+      n = params.get("note");
+    }
+    console.log("App noteParam href:", href, "parsed:", n);
     setNoteParam(n && n.trim() ? n.trim() : null);
   }, []);
 

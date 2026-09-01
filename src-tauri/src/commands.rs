@@ -306,6 +306,8 @@ pub fn open_note_window(
         return Ok(());
     }
 
+    // Em dev: http://localhost:1420/?note=id | Em prod: tauri://localhost/?note=id
+    // Usar `format!("/?note={}", id)` funciona via WebviewUrl::App join (ver manager/webview.rs:454)
     let url = WebviewUrl::App(format!("/?note={}", id).into());
 
     let _win = WebviewWindowBuilder::new(&app, &label, url)
@@ -313,10 +315,11 @@ pub fn open_note_window(
         .inner_size(w, h)
         .position(x, y)
         .resizable(true)
-        .decorations(false)
-        .transparent(true)
+        .decorations(true)
+        .transparent(false)
         .always_on_top(true)
-        .skip_taskbar(true)
+        .skip_taskbar(false)
+        .visible(true)
         .build()
         .map_err(|e| e.to_string())?;
 
