@@ -12,21 +12,48 @@ export default function App() {
   const [noteParam, setNoteParam] = useState<string | null>(null);
 
   useEffect(() => {
-    // Suporta tanto search (?note=) quanto hash (#?note=) e tauri:// scheme
+    // Suporta search (?note=), hash (#note= / #/index.html#note=), tauri:// e __NOTE_ID__ via initialization_script
     const href = window.location.href;
     let n: string | null = null;
-    try {
-      const url = new URL(href);
-      n = url.searchParams.get("note");
-      if (!n && url.hash.includes("note=")) {
-        const hashParams = new URLSearchParams(url.hash.replace(/^#\/?/, ""));
-        n = hashParams.get("note");
+    // Fallback via window.__NOTE_ID__ (injetado pelo Rust se URL falhar)
+    const w = window as unknown as { __NOTE_ID__?: string };
+    if (w.__NOTE_ID__ && w.__NOTE_ID__.trim()) {
+      n = w.__NOTE_ID__.trim();
+    } else {
+      try {
+        const url = new URL(href);
+        n = url.searchParams.get("note");
+        if (!n && url.hash.includes("note=")) {
+          // hash pode ser "#note=id" ou "#/index.html#note=id" ou "#?note=id"
+          const hash = url.hash;
+          // pega tudo após último "#"
+          const lastHash = hash.split("#").pop() ?? "";
+          // tenta como searchParams (note=id) ou como path com ?
+          if (lastHash.includes("note=")) {
+            const hashParams = new URLSearchParams(lastHash.replace(/^\/?/, ""));
+            n = hashParams.get("note");
+          }
+          if (!n) {
+            // fallback: regex simples
+            const m = href.match(/note=([a-f0-9\-]{36})/i);
+            if (m) n = m[1];
+          }
+        }
+        // último fallback: regex no href inteiro
+        if (!n) {
+          const m = href.match(/note=([a-f0-9\-]{36})/i);
+          if (m) n = m[1];
+        }
+      } catch {
+        const params = new URLSearchParams(window.location.search);
+        n = params.get("note");
+        if (!n) {
+          const m = href.match(/note=([a-f0-9\-]{36})/i);
+          if (m) n = m[1];
+        }
       }
-    } catch {
-      const params = new URLSearchParams(window.location.search);
-      n = params.get("note");
     }
-    console.log("App noteParam href:", href, "parsed:", n);
+    console.log("App noteParam href:", href, "parsed:", n, "__NOTE_ID__:", w.__NOTE_ID__);
     setNoteParam(n && n.trim() ? n.trim() : null);
   }, []);
 
