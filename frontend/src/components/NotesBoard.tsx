@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Note } from "../types";
 import * as api from "../api";
 import { NoteCard } from "./NoteCard";
@@ -11,6 +11,7 @@ export function NotesBoard() {
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
+  const titleRef = useRef<HTMLInputElement>(null);
 
   const refresh = async () => {
     try {
@@ -37,6 +38,7 @@ export function NotesBoard() {
       setNotes((prev) => [created, ...prev]);
       setTitle("");
       setContent("");
+      titleRef.current?.focus();
     } catch (e) {
       setError(String(e));
     }
@@ -44,7 +46,6 @@ export function NotesBoard() {
 
   const handleUpdate = async (id: string, patch: Record<string, unknown>) => {
     try {
-      // map camelCase patch to UpdateNotePayload keys
       const payload: Record<string, unknown> = {};
       if ("title" in patch) payload.title = patch.title;
       if ("content" in patch) payload.content = patch.content;
@@ -62,9 +63,7 @@ export function NotesBoard() {
   const handleArchive = async (id: string) => {
     try {
       if (showArchived) {
-        const n = await api.unarchiveNote(id);
-        setNotes((prev) => prev.filter((x) => x.id !== id).concat([]).map((x) => (x.id === id ? n : x)).filter((x) => !x.archived || showArchived));
-        // simpler: refresh
+        await api.unarchiveNote(id);
         await refresh();
       } else {
         await api.archiveNote(id);
@@ -99,7 +98,6 @@ export function NotesBoard() {
     if (!target) return;
     try {
       const updated = await api.setAlwaysOnTop(id, !target.always_on_top);
-      // aplica no window também (global always-on-top — reflete estado da nota mais recente)
       await api.setWindowAlwaysOnTop(updated.always_on_top);
       setNotes((prev) => prev.map((n) => (n.id === id ? updated : n)));
     } catch (e) {
@@ -113,96 +111,167 @@ export function NotesBoard() {
     return n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q) || n.tags.some((t) => t.includes(q));
   });
 
+  const isEmpty = !loading && filtered.length === 0;
+
   return (
-    <div style={{ fontFamily: "system-ui, sans-serif", height: "100vh", display: "flex", flexDirection: "column" }}>
-      <header
-        style={{
-          display: "flex",
-          gap: 8,
-          padding: "8px 12px",
-          alignItems: "center",
-          borderBottom: "1px solid #e5e7eb",
-          background: "white",
-          position: "sticky",
-          top: 0,
-          zIndex: 10,
-        }}
-      >
-        <strong>MasterDesk — Notas</strong>
-        <input
-          placeholder="Buscar..."
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          style={{ flex: "0 1 220px", padding: "6px 8px", borderRadius: 6, border: "1px solid #d1d5db" }}
-        />
-        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13 }}>
+    <div style={{ fontFamily: "inherit", height: "100%", display: "flex", flexDirection: "column", minHeight:0 }}>
+      <header className="md-board-header">
+        <div className="md-search" role="search">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Zm0-13.5a6 6 0 1 0 0 12 6 6 0 0 0 0-12ZM16.2 16.2 21 21" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/>
+          </svg>
+          <input
+            placeholder="Buscar por título, conteúdo ou #tag"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            aria-label="Buscar notas"
+          />
+        </div>
+
+        <label className="md-toggle">
           <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
           Arquivadas
         </label>
-        <span style={{ marginLeft: "auto", fontSize: 12, opacity: 0.6 }}>{filtered.length} notas</span>
+
+        <span className="md-count" aria-live="polite">
+          {filtered.length} {filtered.length === 1 ? "nota" : "notas"}
+          {filter.trim() ? " • filtradas" : ""}
+        </span>
       </header>
 
-      <div style={{ display: "flex", gap: 8, padding: 12, alignItems: "flex-end", background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, fontWeight: 600 }}>Título</label>
+      <div className="md-create-bar">
+        <div className="md-field" style={{ flex:"0 0 240px" }}>
+          <label htmlFor="note-title">Título</label>
           <input
+            id="note-title"
+            ref={titleRef}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Título da nota"
             maxLength={200}
-            style={{ width: 220, padding: "6px 8px", borderRadius: 6, border: "1px solid #d1d5db" }}
+            className="md-input"
+            onKeyDown={(e)=>{ if(e.key==="Enter") handleCreate(); }}
           />
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
-          <label style={{ fontSize: 12, fontWeight: 600 }}>Conteúdo</label>
+        <div className="md-field" style={{ flex:1, minWidth:180 }}>
+          <label htmlFor="note-content">Conteúdo</label>
           <input
+            id="note-content"
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            placeholder="Conteúdo opcional"
-            style={{ padding: "6px 8px", borderRadius: 6, border: "1px solid #d1d5db" }}
+            placeholder="Conteúdo opcional — pressione Enter para criar"
+            className="md-input"
+            onKeyDown={(e)=>{ if(e.key==="Enter") handleCreate(); }}
           />
         </div>
         <button
           onClick={handleCreate}
           disabled={!title.trim()}
-          style={{
-            padding: "8px 14px",
-            borderRadius: 8,
-            background: title.trim() ? "#111" : "#9ca3af",
-            color: "white",
-            border: "none",
-            cursor: title.trim() ? "pointer" : "not-allowed",
-            fontWeight: 600,
-          }}
+          className="md-primary md-primary-accent"
+          aria-disabled={!title.trim()}
         >
           Nova nota
         </button>
       </div>
 
       {error && (
-        <div style={{ margin: 12, padding: 8, background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, color: "#991b1b", fontSize: 13 }}>{error}</div>
+        <div role="alert" className="md-alert">
+          <strong style={{fontWeight:700}}>Algo deu errado:</strong> {error}{" "}
+          <button onClick={()=>setError(null)} style={{marginLeft:8, fontSize:12, textDecoration:"underline", background:"transparent", border:"none", cursor:"pointer", color:"inherit"}}>dispensar</button>
+        </div>
       )}
 
-      <div style={{ position: "relative", flex: 1, overflow: "auto", background: "#f3f4f6" }}>
+      {/* Canvas: scroll invisível mas funcional */}
+      <div
+        className={`scroll-hidden canvas-desk ${isEmpty ? "" : ""}`}
+        style={{
+          position:"relative",
+          flex:1,
+          minHeight:0,
+          // quando vazio, sem overflow para não mostrar gutter; quando tem notas, mantém scroll mas hidden
+          overflow: isEmpty ? "hidden" : undefined,
+          display: isEmpty ? "flex" : "block",
+          flexDirection: isEmpty ? "column" as const : undefined,
+        }}
+        aria-busy={loading}
+      >
         {loading ? (
-          <div style={{ padding: 20, opacity: 0.6 }}>Carregando...</div>
-        ) : filtered.length === 0 ? (
-          <div style={{ padding: 24, textAlign: "center", opacity: 0.6 }}>
-            {showArchived ? "Nenhuma nota arquivada." : "Nenhuma nota. Crie a primeira acima."}
+          <div style={{ padding:"14px" }}>
+            <div className="md-skeleton" />
+            <div className="md-skeleton" style={{ width:"88%" }} />
+            <div className="md-skeleton" style={{ width:"76%" }} />
           </div>
+        ) : isEmpty ? (
+          <EmptyState
+            showArchived={showArchived}
+            hasFilter={Boolean(filter.trim())}
+            onClearFilter={()=>setFilter("")}
+            onFocusCreate={()=>titleRef.current?.focus()}
+          />
         ) : (
-          filtered.map((n) => (
-            <NoteCard
-              key={n.id}
-              note={n}
-              onUpdate={handleUpdate}
-              onArchive={handleArchive}
-              onDelete={handleDelete}
-              onTogglePin={handleTogglePin}
-              onToggleAot={handleToggleAot}
-            />
-          ))
+          <>
+            {/* área virtual para absolute cards — garante altura mínima para scroll */}
+            <div style={{ position:"relative", minHeight:"100%", minWidth:"100%", height: filtered.length>0 ? "720px" : "100%" }}>
+              {filtered.map((n) => (
+                <NoteCard
+                  key={n.id}
+                  note={n}
+                  onUpdate={handleUpdate}
+                  onArchive={handleArchive}
+                  onDelete={handleDelete}
+                  onTogglePin={handleTogglePin}
+                  onToggleAot={handleToggleAot}
+                />
+              ))}
+            </div>
+          </>
         )}
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ showArchived, hasFilter, onClearFilter, onFocusCreate }: {
+  showArchived:boolean; hasFilter:boolean; onClearFilter:()=>void; onFocusCreate:()=>void
+}){
+  if (hasFilter) {
+    return (
+      <div className="md-empty" role="status" aria-live="polite">
+        <div className="md-empty-illus" aria-hidden>
+          <span style={{ fontSize:22, position:"relative", zIndex:1 }}>🔎</span>
+        </div>
+        <h3>Nenhum resultado</h3>
+        <p>Nenhuma nota corresponde à sua busca. Tente outros termos ou limpe o filtro.</p>
+        <button className="md-empty-cta" onClick={onClearFilter}>Limpar busca</button>
+      </div>
+    );
+  }
+  if (showArchived) {
+    return (
+      <div className="md-empty" role="status">
+        <div className="md-empty-illus" aria-hidden>
+          <span style={{ fontSize:22, position:"relative", zIndex:1 }}>🗄️</span>
+        </div>
+        <h3>Nenhuma nota arquivada</h3>
+        <p>Quando você arquivar uma nota, ela aparece aqui. Arquivar mantém a mesa limpa sem perder o conteúdo.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="md-empty" role="status">
+      <div className="md-empty-illus" aria-hidden>
+        {/* sticky note icon */}
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden style={{ position:"relative", zIndex:1 }}>
+          <rect x="4" y="4" width="14" height="14" rx="2.5" fill="white" stroke="#0F1115" strokeWidth="1.4"/>
+          <rect x="7.2" y="7.2" width="14" height="14" rx="2.5" fill="#FFEB3B" stroke="#0F1115" strokeWidth="1.4"/>
+          <path d="M11 11h6M11 14.5h6" stroke="#0F1115" strokeWidth="1.2" strokeLinecap="round"/>
+        </svg>
+      </div>
+      <h3>Sua mesa está limpa</h3>
+      <p>Crie a primeira nota acima. Arraste para organizar, troque a cor e ajuste a opacidade — tudo fica sobre uma mesa pontilhada.</p>
+      <div style={{ display:"flex", gap:8, flexWrap:"wrap", justifyContent:"center" }}>
+        <button className="md-empty-cta md-empty-cta--primary" onClick={onFocusCreate}>Criar primeira nota</button>
+        <span style={{ fontSize:12, color:"var(--muted)", alignSelf:"center" }}>dica: Enter cria rápido</span>
       </div>
     </div>
   );

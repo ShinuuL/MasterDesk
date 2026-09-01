@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import type { Task, Priority } from "../types";
 import * as api from "../api";
 
-// Presets de thresholds em minutos
 const PRESET_THRESHOLDS: { label: string; minutes: number }[] = [
   { label: "5m", minutes: 5 },
   { label: "10m", minutes: 10 },
@@ -14,7 +13,6 @@ const PRESET_THRESHOLDS: { label: string; minutes: number }[] = [
 
 const PRIORITIES: Priority[] = ["Low", "Medium", "High", "Urgent"];
 
-// Helper para extrair minutos de um ReminderThreshold (formato serde enum)
 function thresholdMinutes(t: unknown): number {
   if (t && typeof t === "object") {
     const obj = t as Record<string, unknown>;
@@ -32,7 +30,7 @@ function formatDeadline(iso: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
-  return d.toLocaleString();
+  return d.toLocaleString("pt-BR", { dateStyle:"short", timeStyle:"short" } as never);
 }
 
 export function TasksBoard() {
@@ -41,7 +39,6 @@ export function TasksBoard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Form state
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<Priority>("Medium");
@@ -65,7 +62,6 @@ export function TasksBoard() {
 
   useEffect(() => {
     refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const toggleThreshold = (minutes: number) => {
@@ -156,80 +152,59 @@ export function TasksBoard() {
       new Date(t.deadline) > new Date();
     const priorityColor =
       t.priority === "Urgent"
-        ? "#dc2626"
+        ? "#DC2626"
         : t.priority === "High"
-        ? "#ea580c"
+        ? "#EA580C"
         : t.priority === "Medium"
-        ? "#2563eb"
-        : "#6b7280";
-    const borderColor = overdue ? "#dc2626" : dueSoon ? "#f59e0b" : "#e5e7eb";
+        ? "#3B5BFF"
+        : "#6B7280";
+    const toneClass = overdue ? "md-task--overdue" : dueSoon ? "md-task--soon" : "";
 
     return (
       <div
         key={t.id}
-        style={{
-          border: `1px solid ${borderColor}`,
-          borderLeft: `4px solid ${priorityColor}`,
-          borderRadius: 8,
-          padding: "10px 12px",
-          marginBottom: 8,
-          background: overdue ? "#fef2f2" : dueSoon ? "#fffbeb" : "white",
-        }}
+        className={`md-task ${toneClass}`}
+        style={{ borderLeftColor: priorityColor }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <strong>{t.title}</strong>
-          <span
-            style={{
-              fontSize: 11,
-              padding: "1px 6px",
-              borderRadius: 10,
-              background: priorityColor,
-              color: "white",
-              fontWeight: 600,
-            }}
-          >
+        <div className="md-task-head">
+          <span className="md-task-title">{t.title}</span>
+          <span className="md-badge" style={{ background: priorityColor }}>
             {t.priority}
           </span>
-          {overdue && (
-            <span style={{ fontSize: 11, color: "#991b1b", fontWeight: 700 }}>ATRASADA</span>
-          )}
-          {dueSoon && (
-            <span style={{ fontSize: 11, color: "#92400e", fontWeight: 700 }}>VENCE EM BREVE</span>
-          )}
+          {overdue && <span className="md-due md-due--overdue">• atrasada</span>}
+          {dueSoon && <span className="md-due md-due--soon">• vence em breve</span>}
         </div>
-        {t.description && (
-          <div style={{ fontSize: 13, color: "#4b5563", marginTop: 4 }}>{t.description}</div>
-        )}
-        <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
-          Deadline: {formatDeadline(t.deadline)}
+        {t.description && <div className="md-task-desc">{t.description}</div>}
+        <div className="md-task-meta">
+          <span>Deadline: <strong style={{color:"var(--ink)", fontWeight:600}}>{formatDeadline(t.deadline)}</strong></span>
           {t.reminder_thresholds && t.reminder_thresholds.length > 0 && (
-            <span style={{ marginLeft: 8 }}>
+            <span>
               Lembretes:{" "}
               {t.reminder_thresholds
                 .map((r) => {
                   const mins = thresholdMinutes(r);
                   return mins >= 60 ? `${mins / 60}h` : `${mins}m`;
                 })
-                .join(", ")}
+                .join(" · ")}
             </span>
           )}
         </div>
-        <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
+        <div className="md-btn-row">
           {!t.completed ? (
             <>
-              <button onClick={() => handleComplete(t.id)} style={btnStyle("#16a34a")}>
+              <button onClick={() => handleComplete(t.id)} className="md-btn md-btn--primary">
                 Concluir
               </button>
-              <button onClick={() => handleSnooze(t.id)} style={btnStyle("#6b7280")}>
+              <button onClick={() => handleSnooze(t.id)} className="md-btn">
                 Snooze 15m
               </button>
             </>
           ) : (
-            <button onClick={() => handleReopen(t.id)} style={btnStyle("#2563eb")}>
+            <button onClick={() => handleReopen(t.id)} className="md-btn">
               Reabrir
             </button>
           )}
-          <button onClick={() => handleDelete(t.id)} style={btnStyle("#dc2626")}>
+          <button onClick={() => handleDelete(t.id)} className="md-btn md-btn--danger">
             Deletar
           </button>
         </div>
@@ -237,178 +212,92 @@ export function TasksBoard() {
     );
   };
 
+  const isEmptyAll = !loading && pending.length===0 && completed.length===0;
+
   return (
-    <div
-      style={{
-        fontFamily: "system-ui, sans-serif",
-        height: "100vh",
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
-      <header
-        style={{
-          display: "flex",
-          gap: 8,
-          padding: "8px 12px",
-          alignItems: "center",
-          borderBottom: "1px solid #e5e7eb",
-          background: "white",
-          position: "sticky",
-          top: 0,
-          zIndex: 10,
-        }}
-      >
-        <strong>MasterDesk — Tarefas</strong>
-        <span style={{ marginLeft: "auto", fontSize: 12, opacity: 0.6 }}>
+    <div style={{ fontFamily: "inherit", height:"100%", display:"flex", flexDirection:"column", minHeight:0 }}>
+      <header className="md-board-header">
+        <strong style={{ fontSize:14, letterSpacing:"-.02em" }}>Tarefas</strong>
+        <span className="md-count">
           {pending.length} pendentes · {completed.length} concluídas
         </span>
       </header>
 
-      {/* Form novo task */}
-      <div
-        style={{
-          display: "flex",
-          gap: 8,
-          padding: 12,
-          alignItems: "flex-end",
-          background: "#f9fafb",
-          borderBottom: "1px solid #e5e7eb",
-          flexWrap: "wrap",
-        }}
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, fontWeight: 600 }}>Título</label>
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Título da tarefa"
-            maxLength={200}
-            style={inputStyle}
-          />
+      <div className="md-create-bar" style={{ gap:12 }}>
+        <div className="md-field" style={{ flex:"0 0 200px" }}>
+          <label htmlFor="task-title">Título</label>
+          <input id="task-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Título da tarefa" maxLength={200} className="md-input" />
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, fontWeight: 600 }}>Descrição</label>
-          <input
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Descrição opcional"
-            style={{ ...inputStyle, width: 200 }}
-          />
+        <div className="md-field" style={{ flex:"1 1 160px" }}>
+          <label htmlFor="task-desc">Descrição</label>
+          <input id="task-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Descrição opcional" className="md-input" style={{ width:"100%" }} />
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, fontWeight: 600 }}>Prioridade</label>
-          <select
-            value={priority}
-            onChange={(e) => setPriority(e.target.value as Priority)}
-            style={inputStyle}
-          >
-            {PRIORITIES.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
+        <div className="md-field">
+          <label htmlFor="task-prio">Prioridade</label>
+          <select id="task-prio" value={priority} onChange={(e) => setPriority(e.target.value as Priority)} className="md-select">
+            {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, fontWeight: 600 }}>Deadline</label>
-          <input
-            type="datetime-local"
-            value={deadlineLocal}
-            onChange={(e) => setDeadlineLocal(e.target.value)}
-            style={inputStyle}
-          />
+        <div className="md-field">
+          <label htmlFor="task-deadline">Deadline</label>
+          <input id="task-deadline" type="datetime-local" value={deadlineLocal} onChange={(e) => setDeadlineLocal(e.target.value)} className="md-input" />
         </div>
       </div>
 
-      {/* Thresholds config */}
-      <div
-        style={{
-          padding: "8px 12px",
-          background: "#f3f4f6",
-          borderBottom: "1px solid #e5e7eb",
-          display: "flex",
-          gap: 16,
-          alignItems: "center",
-          flexWrap: "wrap",
-        }}
-      >
-        <span style={{ fontSize: 12, fontWeight: 600 }}>Lembretes antes do deadline:</span>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ padding:"8px 14px", background:"var(--canvas)", borderBottom:"1px solid var(--line)", display:"flex", gap:16, alignItems:"center", flexWrap:"wrap" }}>
+        <span style={{ fontSize:11, fontWeight:700, letterSpacing:".06em", textTransform:"uppercase", color:"var(--muted)" }}>Lembretes antes do deadline:</span>
+        <div style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap" }}>
           {PRESET_THRESHOLDS.map((p) => (
-            <label key={p.minutes} style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 3 }}>
-              <input
-                type="checkbox"
-                checked={thresholds.has(p.minutes)}
-                onChange={() => toggleThreshold(p.minutes)}
-              />
+            <label key={p.minutes} className="md-btn" style={{ padding:"5px 10px", cursor:"pointer", borderColor: thresholds.has(p.minutes) ? "var(--ink)" : undefined, background: thresholds.has(p.minutes) ? "var(--ink)" : "#fff", color: thresholds.has(p.minutes) ? "#fff" : "var(--ink)" }}>
+              <input type="checkbox" checked={thresholds.has(p.minutes)} onChange={() => toggleThreshold(p.minutes)} style={{ display:"none" }} />
               {p.label}
             </label>
           ))}
-          <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 3 }}>
+          <label style={{ fontSize:12, display:"flex", alignItems:"center", gap:6 }}>
             Custom:
-            <input
-              type="number"
-              min={1}
-              value={customMinutes}
-              onChange={(e) => setCustomMinutes(e.target.value)}
-              placeholder="min"
-              style={{ width: 60, padding: "4px 6px", borderRadius: 6, border: "1px solid #d1d5db" }}
-            />
+            <input type="number" min={1} value={customMinutes} onChange={(e) => setCustomMinutes(e.target.value)} placeholder="min" className="md-input" style={{ width:72, padding:"6px 8px", minHeight:32 }} />
           </label>
         </div>
-        <button
-          onClick={handleCreate}
-          disabled={!title.trim()}
-          style={{
-            padding: "8px 14px",
-            borderRadius: 8,
-            background: title.trim() ? "#111" : "#9ca3af",
-            color: "white",
-            border: "none",
-            cursor: title.trim() ? "pointer" : "not-allowed",
-            fontWeight: 600,
-            marginLeft: "auto",
-          }}
-        >
+        <button onClick={handleCreate} disabled={!title.trim()} className="md-primary md-primary-accent" style={{ marginLeft:"auto" }}>
           Nova tarefa
         </button>
       </div>
 
-      {error && (
-        <div
-          style={{
-            margin: 12,
-            padding: 8,
-            background: "#fef2f2",
-            border: "1px solid #fecaca",
-            borderRadius: 6,
-            color: "#991b1b",
-            fontSize: 13,
-          }}
-        >
-          {error}
-        </div>
-      )}
+      {error && <div role="alert" className="md-alert">{error} <button onClick={()=>setError(null)} style={{ marginLeft:8, background:"transparent", border:"none", textDecoration:"underline", cursor:"pointer", color:"inherit", fontSize:12 }}>dispensar</button></div>}
 
-      <div style={{ flex: 1, overflow: "auto", padding: 12, background: "#f3f4f6" }}>
+      <div className="scroll-hidden" style={{ flex:1, minHeight:0, padding:14, background:"var(--canvas)", overflow: isEmptyAll ? "hidden" : undefined, display: isEmptyAll ? "flex" : "block", flexDirection: isEmptyAll ? "column" as const : undefined }}>
         {loading ? (
-          <div style={{ padding: 20, opacity: 0.6 }}>Carregando...</div>
+          <>
+            <div className="md-skeleton" />
+            <div className="md-skeleton" style={{ width:"92%" }} />
+          </>
+        ) : isEmptyAll ? (
+          <div className="md-empty" role="status">
+            <div className="md-empty-illus" aria-hidden>
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden style={{ position:"relative", zIndex:1 }}>
+                <rect x="5" y="5" width="14" height="14" rx="3" fill="white" stroke="#0F1115" strokeWidth="1.4"/>
+                <path d="M8 10h8M8 13h5" stroke="#0F1115" strokeWidth="1.3" strokeLinecap="round"/>
+                <circle cx="17" cy="7" r="3" fill="#FFEB3B" stroke="#0F1115" strokeWidth="1.2"/>
+                <path d="M15.6 7.2 16.6 8.2 18.4 6.2" stroke="#0F1115" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </div>
+            <h3>Nenhuma tarefa ainda</h3>
+            <p>Crie sua primeira tarefa acima. Defina prioridade, deadline e lembretes — atrasadas sobem com borda vermelha.</p>
+            <div style={{ fontSize:12, color:"var(--muted)", marginTop:2 }}>Dica: use 1h / 30m para lembretes antes do prazo.</div>
+          </div>
         ) : (
           <>
-            <h3 style={{ fontSize: 14, margin: "4px 0 8px" }}>Pendentes</h3>
+            <h3 style={{ fontSize:12, fontWeight:700, letterSpacing:".06em", textTransform:"uppercase", color:"var(--muted)", margin:"2px 0 10px" }}>Pendentes</h3>
             {pending.length === 0 ? (
-              <div style={{ opacity: 0.6, fontSize: 13, padding: "8px 0" }}>
-                Nenhuma tarefa pendente.
-              </div>
+              <div style={{ background:"#fff", border:"1px dashed var(--line-strong)", borderRadius:12, padding:"14px", fontSize:13, color:"var(--muted)", marginBottom:12 }}>Nenhuma tarefa pendente — bom trabalho!</div>
             ) : (
               pending.map(renderTask)
             )}
-            <h3 style={{ fontSize: 14, margin: "20px 0 8px" }}>Concluídas</h3>
+            <h3 style={{ fontSize:12, fontWeight:700, letterSpacing:".06em", textTransform:"uppercase", color:"var(--muted)", margin:"18px 0 10px" }}>
+              Concluídas {completed.length>0 && <span style={{ fontWeight:500, textTransform:"none", letterSpacing:0 }}>· {completed.length}</span>}
+            </h3>
             {completed.length === 0 ? (
-              <div style={{ opacity: 0.6, fontSize: 13, padding: "8px 0" }}>
-                Nenhuma tarefa concluída.
-              </div>
+              <div style={{ fontSize:13, color:"var(--muted)", padding:"6px 0" }}>Nenhuma tarefa concluída ainda.</div>
             ) : (
               completed.map(renderTask)
             )}
@@ -418,20 +307,3 @@ export function TasksBoard() {
     </div>
   );
 }
-
-const inputStyle: React.CSSProperties = {
-  padding: "6px 8px",
-  borderRadius: 6,
-  border: "1px solid #d1d5db",
-};
-
-const btnStyle = (color: string): React.CSSProperties => ({
-  padding: "5px 10px",
-  borderRadius: 6,
-  border: "none",
-  background: color,
-  color: "white",
-  fontSize: 12,
-  cursor: "pointer",
-  fontWeight: 600,
-});

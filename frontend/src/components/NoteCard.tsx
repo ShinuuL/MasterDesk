@@ -1,7 +1,11 @@
 import { useState, useRef } from "react";
 import type { Note } from "../types";
 
-const COLORS = ["#FFEB3B", "#FF9800", "#8BC34A", "#03A9F4", "#E91E63", "#9C27B0", "#FFFFFF", "#263238"];
+const COLORS = ["#FFEB3B", "#FF9800", "#8BC34A", "#03A9F4", "#E91E63", "#9C27B0", "#FFFFFF", "#263238"] as const;
+const COLOR_LABEL: Record<string,string> = {
+  "#FFEB3B":"Amarelo", "#FF9800":"Laranja", "#8BC34A":"Verde", "#03A9F4":"Azul",
+  "#E91E63":"Rosa", "#9C27B0":"Roxo", "#FFFFFF":"Branco", "#263238":"Grafite"
+};
 
 interface Props {
   note: Note;
@@ -10,6 +14,13 @@ interface Props {
   onDelete: (id: string) => void;
   onTogglePin: (id: string) => void;
   onToggleAot: (id: string) => void;
+}
+
+function textColorFor(bg: string): string {
+  // usa grafite/escuro contrastante; amarelo e branco precisam ink escuro, grafite precisa claro
+  if (bg === "#263238") return "#FFFFFF";
+  if (bg === "#9C27B0" || bg === "#E91E63") return "#FFFFFF";
+  return "#0F1115";
 }
 
 export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onToggleAot }: Props) {
@@ -35,8 +46,6 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
       const dy = ev.clientY - dragRef.current.y;
       const nx = dragRef.current.orig[0] + dx;
       const ny = dragRef.current.orig[1] + dy;
-      // visual feedback via direct style? we emit position continuously
-      // debounce final persist on mouseup
       const el = document.getElementById(`note-${note.id}`);
       if (el) {
         el.style.left = `${nx}px`;
@@ -62,61 +71,49 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
     onUpdate(note.id, { size: [newW, newH] });
   };
 
+  const ink = textColorFor(note.color);
+  const isDark = ink === "#FFFFFF";
+
   return (
     <div
       id={`note-${note.id}`}
+      className={`md-note ${note.pinned ? "md-note--pinned" : ""}`}
       style={{
-        position: "absolute",
         left: note.position[0],
         top: note.position[1],
         width: note.size[0],
         height: note.size[1],
         background: note.color,
         opacity: note.opacity,
-        borderRadius: 10,
-        boxShadow: note.pinned ? "0 6px 20px rgba(0,0,0,0.25)" : "0 2px 10px rgba(0,0,0,0.15)",
-        border: note.pinned ? "2px solid #111" : "1px solid rgba(0,0,0,0.1)",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-        minWidth: 180,
-        minHeight: 140,
-        resize: "both",
+        color: ink,
       }}
       onMouseUp={(e) => {
-        // detect resize via manual check: if size changed, persist
         const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
         if (Math.abs(rect.width - note.size[0]) > 2 || Math.abs(rect.height - note.size[1]) > 2) {
-          handleResizeEnd(rect.width, rect.height);
+          handleResizeEnd(Math.round(rect.width), Math.round(rect.height));
         }
       }}
+      role="article"
+      aria-label={note.title}
     >
       <div
         onMouseDown={handleMouseDown}
-        style={{
-          cursor: "grab",
-          padding: "6px 8px",
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          background: "rgba(0,0,0,0.06)",
-          userSelect: "none",
-          fontWeight: 600,
-          fontSize: 13,
-        }}
+        className="md-note-head"
+        style={{ color: ink, borderColor: isDark ? "rgba(255,255,255,.14)" : "rgba(15,17,21,.08)" }}
       >
-        <span style={{ flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        <span className="md-grip" aria-hidden>⋮⋮</span>
+        <span className="md-note-title" title={note.title}>
           {note.title} {note.pinned ? "📌" : ""} {note.always_on_top ? "⬆" : ""}
         </span>
-        <button onClick={() => onTogglePin(note.id)} title="Fixar" style={iconBtnStyle}>
+        <button onClick={() => onTogglePin(note.id)} title={note.pinned ? "Desafixar" : "Fixar"} aria-pressed={note.pinned} className="md-icon-btn" style={{ color: ink, borderColor: isDark ? "rgba(255,255,255,.22)" : undefined, background: isDark ? "rgba(255,255,255,.12)" : undefined }}>
           {note.pinned ? "Unpin" : "Pin"}
         </button>
-        <button onClick={() => onToggleAot(note.id)} title="Always on top" style={iconBtnStyle}>
+        <button onClick={() => onToggleAot(note.id)} title="Always on top" aria-pressed={note.always_on_top} className="md-icon-btn" style={{ color: ink, borderColor: isDark ? "rgba(255,255,255,.22)" : undefined, background: isDark ? "rgba(255,255,255,.12)" : undefined }}>
           {note.always_on_top ? "AOT off" : "AOT on"}
         </button>
       </div>
 
-      <div style={{ padding: 8, flex: 1, display: "flex", flexDirection: "column", gap: 8, overflow: "auto" }}>
+      <div className="md-note-body">
         {editing ? (
           <>
             <input
@@ -124,17 +121,19 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Título"
               maxLength={200}
-              style={inputStyle}
+              className="md-input-sm"
+              autoFocus
             />
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
               placeholder="Conteúdo"
               rows={4}
-              style={{ ...inputStyle, resize: "vertical" }}
+              className="md-input-sm"
+              style={{ resize:"vertical", minHeight:72 }}
             />
-            <div style={{ display: "flex", gap: 6 }}>
-              <button onClick={save} style={primaryBtnStyle}>
+            <div style={{ display:"flex", gap:6 }}>
+              <button onClick={save} className="md-icon-btn" style={{ background: ink, color: note.color, borderColor: ink, fontWeight:700 }}>
                 Salvar
               </button>
               <button
@@ -143,7 +142,7 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
                   setContent(note.content);
                   setEditing(false);
                 }}
-                style={iconBtnStyle}
+                className="md-icon-btn"
               >
                 Cancelar
               </button>
@@ -151,65 +150,58 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
           </>
         ) : (
           <>
-            <div style={{ whiteSpace: "pre-wrap", fontSize: 13, lineHeight: 1.4, flex: 1 }}>{note.content || <i style={{ opacity: 0.6 }}>sem conteúdo</i>}</div>
-            <button onClick={() => setEditing(true)} style={iconBtnStyle}>
+            <div style={{ whiteSpace:"pre-wrap", fontSize:13, lineHeight:1.5, flex:1, wordBreak:"break-word" }}>
+              {note.content || <i style={{ opacity:.6 }}>sem conteúdo</i>}
+            </div>
+            <button onClick={() => setEditing(true)} className="md-icon-btn" style={{ alignSelf:"flex-start" }}>
               Editar
             </button>
           </>
         )}
 
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
-          {COLORS.map((c) => (
-            <button
-              key={c}
-              onClick={() => onUpdate(note.id, { color: c })}
-              title={c}
-              style={{
-                width: 18,
-                height: 18,
-                borderRadius: "50%",
-                background: c,
-                border: c === note.color ? "2px solid #111" : "1px solid rgba(0,0,0,0.2)",
-                cursor: "pointer",
-              }}
-            />
-          ))}
+        <div style={{ display:"flex", flexWrap:"wrap", gap:5, alignItems:"center" }} role="group" aria-label="Escolher cor">
+          {COLORS.map((c) => {
+            const selected = c === note.color;
+            return (
+              <button
+                key={c}
+                onClick={() => onUpdate(note.id, { color: c })}
+                title={COLOR_LABEL[c] ?? c}
+                aria-label={`Cor ${COLOR_LABEL[c] ?? c}`}
+                aria-pressed={selected}
+                style={{
+                  width:20, height:20, borderRadius:"50%",
+                  background:c,
+                  border: selected ? "2.5px solid #0F1115" : "1px solid rgba(15,17,21,.18)",
+                  cursor:"pointer",
+                  boxShadow: selected ? "0 0 0 2px rgba(15,17,21,.08)" : "0 1px 2px rgba(0,0,0,.08)",
+                  position:"relative",
+                  display:"grid", placeItems:"center",
+                }}
+              >
+                {selected && <span aria-hidden style={{ fontSize:10, lineHeight:1, color: c==="#263238"||c==="#9C27B0" ? "#fff" : "#0F1115", fontWeight:800 }}>✓</span>}
+              </button>
+            );
+          })}
         </div>
 
-        <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
+        <label style={{ fontSize:11, fontWeight:600, letterSpacing:".04em", textTransform:"uppercase", opacity:.75, display:"flex", alignItems:"center", gap:7, flexWrap:"wrap" }}>
           Opacidade
-          <input
-            type="range"
-            min={0.1}
-            max={1}
-            step={0.05}
-            value={note.opacity}
-            onChange={(e) => onUpdate(note.id, { opacity: parseFloat(e.target.value) })}
-          />
-          <span>{Math.round(note.opacity * 100)}%</span>
+          <input type="range" min={0.1} max={1} step={0.05} value={note.opacity} onChange={(e) => onUpdate(note.id, { opacity: parseFloat(e.target.value) })} aria-label="Opacidade" style={{ flex:1 }} />
+          <span style={{ fontVariantNumeric:"tabular-nums", fontSize:12, opacity:1, textTransform:"none", letterSpacing:0 }}>{Math.round(note.opacity * 100)}%</span>
         </label>
 
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          <button onClick={() => onArchive(note.id)} style={iconBtnStyle}>
-            Arquivar
-          </button>
-          <button onClick={() => onDelete(note.id)} style={{ ...iconBtnStyle, color: "#b00020" }}>
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+          <button onClick={() => onArchive(note.id)} className="md-icon-btn">Arquivar</button>
+          <button onClick={() => onDelete(note.id)} className="md-icon-btn" style={{ color:"#B91C1C", borderColor:"rgba(185,28,28,.22)" }}>
             Deletar
           </button>
         </div>
 
         {note.tags.length > 0 && (
-          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+          <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
             {note.tags.map((t) => (
-              <span
-                key={t}
-                style={{
-                  fontSize: 11,
-                  background: "rgba(0,0,0,0.08)",
-                  padding: "2px 6px",
-                  borderRadius: 999,
-                }}
-              >
+              <span key={t} style={{ fontSize:11, background: isDark ? "rgba(255,255,255,.14)" : "rgba(15,17,21,.08)", color: ink, padding:"2px 7px", borderRadius:999, fontWeight:500 }}>
                 #{t}
               </span>
             ))}
@@ -219,28 +211,3 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
     </div>
   );
 }
-
-const iconBtnStyle: React.CSSProperties = {
-  fontSize: 11,
-  padding: "4px 6px",
-  borderRadius: 6,
-  border: "1px solid rgba(0,0,0,0.15)",
-  background: "white",
-  cursor: "pointer",
-};
-
-const primaryBtnStyle: React.CSSProperties = {
-  ...iconBtnStyle,
-  background: "#111",
-  color: "white",
-  borderColor: "#111",
-};
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "6px 8px",
-  borderRadius: 6,
-  border: "1px solid rgba(0,0,0,0.2)",
-  fontSize: 13,
-  fontFamily: "inherit",
-};
