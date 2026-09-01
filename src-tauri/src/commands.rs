@@ -306,9 +306,15 @@ pub fn open_note_window(
         return Ok(());
     }
 
-    // Em dev: http://localhost:1420/?note=id | Em prod: tauri://localhost/?note=id
-    // Usar `format!("/?note={}", id)` funciona via WebviewUrl::App join (ver manager/webview.rs:454)
-    let url = WebviewUrl::App(format!("/?note={}", id).into());
+    println!(
+        "open_note_window: id={} title={} x={} y={} w={} h={}",
+        id, title, x, y, w, h
+    );
+    // Em dev: http://localhost:1420/#note=id | Em prod: tauri://localhost/#note=id
+    // Hash (#) garante que o loader serve index.html (path "/") e o JS lê via App.tsx
+    // que já checa search + hash. Query (?note=) falhava em release (resource lookup).
+    let url = WebviewUrl::App(format!("/#note={}", id).into());
+    println!("open_note_window url: {:?}", url);
 
     let _win = WebviewWindowBuilder::new(&app, &label, url)
         .title(&title)
