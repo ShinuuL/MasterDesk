@@ -13,9 +13,12 @@
     "windows": [
       {
         "title": "MasterDesk",
-        "width": 400,
-        "height": 300,
+        "width": 1080,
+        "height": 620,
+        "minWidth": 800,
+        "minHeight": 500,
         "resizable": true,
+        "center": true,
         "alwaysOnTop": false
       }
     ],
