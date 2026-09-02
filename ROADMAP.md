@@ -114,15 +114,77 @@ Só inicia depois da Fase 3 **e** com definição de `AuthenticationProvider`
 local. Segue bloqueada para qualquer suposição sobre o mecanismo real do
 Mastersys (Regra 1 do CLAUDE.md).
 
-## Fase 5 — Integração Mastersys 🔒 Bloqueada (ADR-006)
+## Fase 5 — Integração Mastersys ✅ Concluída (2026-09-02)
 
-Só inicia quando o DEV fornecer a documentação/contrato real da API do
-Mastersys. Nenhuma tarefa pode ser aberta antes disso.
+Branch: `feature/phase2-3-notes-tasks`
+
+Desbloqueada porque o contrato foi **validado no código-fonte** do Mastersys
+(`alrindoMaster/gerenciador_relatorios_V3`), não suposto — a tabela de
+rastreabilidade endpoint→arquivo está no ADR-006.
+
+**Entregue:**
+- ADR-006 aceito: MasterDesk **consulta** a API do Mastersys, somente leitura
+  (as duas alternativas — implementar o contrato NoteDesk local, ou coexistir
+  com o Notas Flutuantes — estão comparadas no ADR).
+- `SupportSystemProvider` com contrato real (sem nenhum método de escrita) e
+  `MastersysProvider` em `infrastructure` como único módulo que conhece
+  HTTP/JWT/JSON.
+- `ExternalRef`/`ExternalWorkItem` no domínio; tarefa local segue com
+  `external: None` e não depende de integração alguma.
+- Reconciliação em `MastersysSyncService`: importa, atualiza, remove o que saiu
+  da fila e **preserva** espelhos que têm anotações do usuário.
+- `effective_due_date` replicando `getEffectiveDueDate` do Mastersys, com testes.
+- Refresh token no cofre do SO (`keyring`); senha nunca persistida; nenhum token
+  devolvido ao frontend.
+- Painel de configuração em `MastersysPanel.tsx`.
+
+**Pendente para fechar como suportado nos 3 SOs:**
+- Fluxo de login + sync validado apenas em **Windows 11**. Cofre em macOS
+  (Keychain) e Linux (Secret Service) precisa de validação manual —
+  compilação não é validação cross-platform (CLAUDE §19).
+- Sincronização é manual (botão). Agendador periódico não foi implementado.
+- Falta de permissão em `/api/tickets` aborta o sync inteiro em vez de degradar
+  para "só tarefas".
+
+---
+
+## Fase 5.1 — Anotações em tarefas ✅ Concluída (2026-09-02)
+
+- `TaskNote` como entidade própria, filha de `Task` (não um campo de texto):
+  cada anotação tem `created_at` próprio, o que dá a linha do tempo, e
+  `description` continua sendo o enunciado — que é sobrescrito nos itens vindos
+  do Mastersys.
+- `task_notes` com `ON DELETE CASCADE` (migration 0005) e `foreign_keys(true)`
+  no pool.
+- `TaskNoteService` + comandos Tauri + UI de log de atendimento.
+
+---
+
+## Fase 5.2 — Tema claro/escuro/automático ✅ Concluída (2026-09-02)
+
+Antecipa parte da Fase 8. Ver ADR-009.
+
+- Tokens de CSS divididos por **papel** (`--text*`, `--surface*`, `--chrome*`,
+  `--action*`) — o `--ink` anterior era texto E fundo de nav/botão ao mesmo
+  tempo e não sobrevivia à inversão.
+- Modo automático usa a API nativa do Tauri (`theme()` + `onThemeChanged`) como
+  fonte da verdade, porque a propagação para `prefers-color-scheme` do webview é
+  bug aberto no Linux; a media query fica como fallback.
+- Tone-mapping das cores de nota (`noteSurface.ts`): matiz preservado,
+  saturação/luminosidade recalculadas, texto por contraste WCAG real.
+- Corrigido um defeito pré-existente: `textColorFor` cobria só as 8 cores
+  predefinidas, e o rosa do preset não atingia AA nem no tema claro.
+- 66 testes de frontend (vitest) cobrindo as 36 combinações cor × tema.
+
+**Pendente:** `onThemeChanged`/`theme()` validados só em Windows 11.
 
 ## Fase 6 — IA (advisory) 🔒 Bloqueada (ADR-007)
 
-Só inicia após Fase 5, com o contexto de task/ticket já modelado. IA nunca
-executa efeitos colaterais externos sem autorização explícita futura.
+O pré-requisito "contexto de task/ticket modelado" foi atendido pela Fase 5
+(`ExternalRef` + `TaskNote` dão à IA o histórico de um atendimento). Segue
+bloqueada por ADR-007: provedor, gestão de segredo e limites de autorização
+ainda não decididos. IA nunca executa efeitos colaterais externos sem
+autorização explícita futura.
 
 ---
 

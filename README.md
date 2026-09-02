@@ -1,4 +1,71 @@
-# MasterDesk — Scaffold (Fase 1: Foundation)
+# MasterDesk
+
+Notas e tarefas de desktop, extensível, com integração opcional ao Mastersys
+Suporte. Rust + Tauri 2 + TypeScript/React, SQLite via sqlx.
+
+> **Estado atual:** Fases 1–5 concluídas. O quadro de notas e tarefas funciona
+> ponta a ponta, com anotações dentro de tarefas, tema claro/escuro/automático e
+> sincronização somente-leitura com o Mastersys. Detalhe por fase — incluindo o
+> que ainda **não** foi validado fora do Windows — no [ROADMAP](./ROADMAP.md).
+
+## Comandos
+
+**Pré-requisito no Linux:** `libdbus-1-dev` e `pkg-config`. A feature
+`sync-secret-service` do `keyring` linka com o D-Bus do sistema via
+`libdbus-sys`; sem o dev package o build falha na compilação, não em runtime.
+Windows e macOS não precisam de nada além do toolchain.
+
+```bash
+# Rust
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace              # 123 testes
+
+# Frontend
+npm --prefix frontend test          # 66 testes (vitest)
+npm --prefix frontend run build
+
+# App
+cargo tauri dev
+```
+
+## Funcionalidades
+
+| | Onde | Documentação |
+|---|---|---|
+| Notas (sticky notes, pop-out, always-on-top) | `frontend/src/components/NoteCard.tsx` | ADR-002, ADR-003 |
+| Tarefas com prazo e lembretes | `crates/application/src/tasks.rs` | ADR-004 |
+| **Anotações dentro de tarefas** | `crates/domain/src/task_notes.rs` | ROADMAP Fase 5.1 |
+| **Tema claro/escuro/automático** | `frontend/src/theme/` | [ADR-009](./ADR/ADR-009-theming.md) |
+| **Integração Mastersys (somente leitura)** | `crates/infrastructure/src/mastersys_provider.rs` | [ADR-006](./ADR/ADR-006-mastersys-integration.md), [guia](./docs/INTEGRACAO_MASTERSYS.md) |
+| Autenticação local | `crates/infrastructure/src/local_auth_repository.rs` | ADR-005 |
+
+## Dependências relevantes (CLAUDE §16)
+
+| Crate/pacote | Versão | Para quê | Licença |
+|---|---|---|---|
+| `tauri` | 2 | janela, tray, empacotamento | MIT/Apache-2.0 |
+| `sqlx` | 0.8 | SQLite; migrations **embutidas** via `migrate!` | MIT/Apache-2.0 |
+| `argon2` | 0.5 | hash de senha local (nunca plaintext) | MIT/Apache-2.0 |
+| `reqwest` | 0.13 | HTTP para a API do Mastersys; TLS `rustls` + loja do SO, sem OpenSSL | MIT/Apache-2.0 |
+| `keyring` | 3.6 | cofre nativo do SO para o refresh token (3.x de propósito — ver ADR-006) | MIT/Apache-2.0 |
+| `react` | 18 | UI | MIT |
+| `vitest` | 3 | testes do frontend (dev) | MIT |
+
+## Segurança em uma linha
+
+Senha nunca é persistida. Refresh token vai para o Credential Manager /
+Keychain / Secret Service, nunca para o SQLite — `app_settings` é só para
+configuração não sensível, porque o banco fica sem criptografia no diretório do
+usuário. Nenhum comando Tauri devolve token ao frontend.
+
+---
+
+# Histórico — scaffold da Fase 1
+
+> A seção abaixo é o README original do scaffold, preservado como registro.
+> Partes dela já não descrevem o estado atual do repositório.
+
 
 Estrutura gerada a partir de ADR-001, 002, 003, 004 e 008 (`docs/adr/`) e do
 `docs/ROADMAP.md`.

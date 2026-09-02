@@ -1,133 +1,42 @@
-# Integração MasterDesk ↔ NoteDesk
+# Integração NoteDesk — SUBSTITUÍDO
 
-> Cliente isolado: `notedesk-integration-client.js` — sem dependências, Node.js 18+, API key apenas no servidor.
+> **Este documento está obsoleto e descrevia a direção errada da integração.**
+> Use [INTEGRACAO_MASTERSYS.md](./INTEGRACAO_MASTERSYS.md) e
+> [ADR-006](../ADR/ADR-006-mastersys-integration.md).
 
-## 1. Visão geral
+## O que estava incorreto
 
-- **MasterDesk** mantém notas/tasks locais (SQLite `masterdesk.db`) e pode espelhar tasks para um sistema externo **NoteDesk** via `POST /api/v1/tasks/upsert`.
-- O cliente `NoteDeskClient` encapsula autenticação (`X-NoteDesk-Api-Key`), timeout, abort e tratamento de erro tipado (`NoteDeskIntegrationError`).
-- Arquitetura segue `CLAUDE.md §10` (Mastersys/NoteDesk como `SupportSystemProvider` externo) e `AGENTS.md` (domain nunca depende de http).
+A versão anterior deste documento descrevia o MasterDesk como **cliente** que
+empurra tarefas para um sistema chamado NoteDesk, via
+`POST /api/v1/tasks/upsert` com `X-NoteDesk-Api-Key`.
 
-```
-MasterDesk (Tauri+SQLite) ──> NoteDeskClient (Node) ──> NoteDesk API
-     │  masterdesk.db               │  endpoint+apiKey          │  /health  /tasks/upsert
-     └─ Task/Note ──────────────────┘                           └─ source_system
-```
+A leitura do código real do Mastersys (`alrindoMaster/gerenciador_relatorios_V3`)
+mostrou que a direção é a oposta:
 
-## 2. Configuração
+- `modules/tasks/services/NoteDeskSyncService.ts` — o **Mastersys** monta o
+  payload e o enfileira em `task_notedesk_outbox`.
+- `frontend/src/hooks/useNoteDeskBridge.ts` — uma ponte no navegador do usuário
+  consome a fila e entrega em `http://127.0.0.1:17882/api/v1/tasks/upsert`.
+- O receptor é um app local do Windows, **"Notas Flutuantes"**, cuja chave fica
+  em `%LOCALAPPDATA%\NotasFlutuantes\integracao.json`.
 
-Variáveis de ambiente **apenas no servidor** (nunca no bundle Tauri/frontend):
+Ou seja: o NoteDesk é um **servidor local** que recebe, não um serviço remoto
+para onde se empurra. O cliente descrito aqui não tinha nada do outro lado para
+conversar.
 
-```env
-NOTEDESK_ENDPOINT=https://notedesk.exemplo.com
-NOTEDESK_API_KEY=sk_live_...        # nunca commitar
-NOTEDESK_SOURCE_SYSTEM=masterdesk   # identifica origem no NoteDesk
-```
+## O que foi decidido no lugar
 
-Ou via construtor:
+O MasterDesk **consulta** a API do Mastersys (somente leitura), autenticado com
+as credenciais do próprio usuário. Sem porta de escuta, sem API key
+compartilhada, sem dependência de navegador aberto e sem alteração no Mastersys.
+As três alternativas consideradas — incluindo implementar o contrato NoteDesk —
+estão comparadas no ADR-006.
 
-```js
-const { NoteDeskClient } = require('./notedesk-integration-client.js');
-const client = new NoteDeskClient({
-  endpoint: process.env.NOTEDESK_ENDPOINT,
-  apiKey: process.env.NOTEDESK_API_KEY,
-  sourceSystem: 'masterdesk',
-  timeoutMs: 10000, // opcional
-});
-```
+## Pendência para o DEV
 
-## 3. Uso
+`notedesk-integration-client.js`, na raiz do repositório, é o cliente que este
+documento descrevia. Ele implementa o contrato na direção que não é usada e hoje
+não tem nenhum consumidor no projeto.
 
-### Health check
-
-```js
-await client.health(); // GET /api/v1/health -> {status:"ok", ...}
-```
-
-### Upsert de Task (espelhar tarefa local)
-
-```js
-// Task vinda de masterdesk-application (TaskService)
-await client.upsertTask({
-  external_task_id: task.id, // UUID da task local
-  title: task.title,
-  description: task.description,
-  priority: task.priority, // Low/Medium/High/Urgent
-  deadline: task.deadline, // ISO8601 ou null
-  reminder_thresholds: task.reminder_thresholds,
-  completed: task.completed,
-  assigned_user: { id: user.id, name: user.username } // obrigatório
-  // source_system é injetado automaticamente
-});
-```
-
-Regras do cliente (validação local):
-- `external_task_id` obrigatório
-- `assigned_user.id` e `assigned_user.name` obrigatórios
-- `source_system` sobrescrito para o valor do construtor
-
-### Tratamento de erro
-
-```js
-const { NoteDeskIntegrationError } = require('./notedesk-integration-client.js');
-try {
-  await client.upsertTask(task);
-} catch (e) {
-  if (e instanceof NoteDeskIntegrationError) {
-    console.error(e.message, e.status, e.response);
-  }
-}
-```
-
-## 4. Integração com MasterDesk (proposto)
-
-- **Application layer:** novo `SupportSystemProvider` → `NoteDeskProvider` que usa `NoteDeskClient` (infrastructure). Métodos: `pushTask(task: Task)`, `is_configured(): bool`.
-- **Tauri command:** `sync_task_to_notedesk(id)` chama `TaskService` + `NoteDeskProvider` após `task_repo.save`.
-- **Frontend:** botão "Sincronizar com NoteDesk" em `TasksBoard.tsx` (opcional, após Fase 6 IA).
-- **Segurança:** `NOTEDESK_API_KEY` via `MASTERDESK_NOTEDESK_API_KEY` env ou OS keychain (tauri-plugin-stronghold), nunca logada.
-
-## 5. Como testar localmente (sem NoteDesk real)
-
-### Mock com `npx` http-echo ou json-server
-
-```bash
-# 1) subir mock
-npx json-server --watch mock-notedesk.json --port 3001 &
-# mock-notedesk.json deve ter {"health":{"status":"ok"}}
-
-# 2) testar cliente com timeout
-node -e "
-const {NoteDeskClient}=require('./notedesk-integration-client.js');
-const c=new NoteDeskClient({endpoint:'http://localhost:3001', apiKey:'test', sourceSystem:'masterdesk'});
-c.health().then(r=>console.log('health ok',r)).catch(e=>console.error('health fail',e.message));
-"
-```
-
-Ou teste unitário simples (sem rede) — validação de argumentos já ocorre sem endpoint:
-
-```bash
-node -e "
-const {NoteDeskClient}=require('./notedesk-integration-client.js');
-try { new NoteDeskClient({endpoint:'', apiKey:'x', sourceSystem:'y'}) } catch(e){ console.log('endpoint obrigatório:', e.message) }
-try { const c=new NoteDeskClient({endpoint:'http://x', apiKey:'x', sourceSystem:'masterdesk'}); c.upsertTask({}) } catch(e){ console.log('validação:', e.message) }
-"
-# esperado: endpoint é obrigatório / task.external_task_id é obrigatório
-"
-```
-
-## 6. Status atual (2026-09-01)
-
-- **Cliente** `notedesk-integration-client.js` **funcionando**: validado com `node -e` (validações de `endpoint/apiKey/sourceSystem` e `external_task_id/assigned_user`), sem dependências, com `AbortController` + `fetch` nativo Node 18+.
-- **MasterDesk** ainda **não consome** o cliente (Fase 5 Mastersys/NoteDesk está 🔒 Bloqueada por ADR-006 até o DEV fornecer o contrato real da API). O esqueleto `SupportSystemProvider` existe como trait vazia (`crates/domain/src/ports.rs`), e a Fase 4 (auth local) foi concluída sem acoplar domínio ao HTTP.
-- **Próximo passo para ativar:** definir `NOTEDESK_ENDPOINT` real + implementar `NoteDeskProvider` em `crates/infrastructure` e expor `sync_task` no `src-tauri/src/commands.rs`. O documento acima já descreve o contrato esperado (`POST /api/v1/tasks/upsert` com `X-NoteDesk-Api-Key` e `source_system`).
-
-## 7. Checklist antes de produção
-
-- [ ] `NOTEDESK_API_KEY` em vault/keychain, não em `.env` commitado
-- [ ] `endpoint` com `https` e certificado válido
-- [ ] Teste `health` em staging antes de `upsertTask`
-- [ ] Rate-limit / retry com backoff no `NoteDeskClient.request` (já tem timeout/abort)
-- [ ] Log sem vazar `apiKey` (cliente atual não loga headers)
-
----
-Gerado para MasterDesk `feature/phase2-3-notes-tasks` — cliente em `notedesk-integration-client.js` (79 linhas, zero deps).
+Não foi removido porque é trabalho de outro autor (Collaborative Rule 6). Se não
+houver plano de uso, pode ser apagado.
