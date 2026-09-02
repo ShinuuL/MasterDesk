@@ -3,7 +3,11 @@
 
 pub mod entities;
 pub mod errors;
+pub mod external;
 pub mod ports;
+pub mod task_notes;
 
 pub use entities::*;
 pub use errors::{DomainError, DomainResult};
+pub use external::{ExternalKind, ExternalRef, ExternalSystem, ExternalWorkItem, SupportIdentity};
+pub use task_notes::{TaskNote, TaskNoteId, MAX_TASK_NOTE_CHARS};

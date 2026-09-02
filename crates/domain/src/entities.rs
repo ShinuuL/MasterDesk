@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::errors::{DomainError, DomainResult};
+use crate::external::ExternalRef;
 
 pub type NoteId = Uuid;
 pub type TaskId = Uuid;
@@ -380,6 +381,80 @@ mod tests {
     // Task tests
     // -----------------------------------------------------------------------
 
+    // -----------------------------------------------------------------------
+    // Vínculo externo (ADR-006)
+    // -----------------------------------------------------------------------
+
+    fn mastersys_item(id: &str, title: &str) -> crate::external::ExternalWorkItem {
+        use crate::external::{ExternalKind, ExternalRef, ExternalSystem, ExternalWorkItem};
+        let r = ExternalRef::new(ExternalSystem::Mastersys, ExternalKind::Ticket, id).unwrap();
+        ExternalWorkItem::new(r, title).unwrap()
+    }
+
+    #[test]
+    fn task_is_local_by_default() {
+        let t = Task::new("local").unwrap();
+        assert!(!t.is_external());
+        assert!(t.external.is_none());
+    }
+
+    #[test]
+    fn attach_external_marks_origin_without_touching_updated_at() {
+        use crate::external::{ExternalKind, ExternalRef, ExternalSystem};
+        let t = Task::new("do banco").unwrap();
+        let before = t.updated_at;
+        let r = ExternalRef::new(ExternalSystem::Mastersys, ExternalKind::Task, "77").unwrap();
+        let t = t.attach_external(Some(r));
+        assert!(t.is_external());
+        assert_eq!(t.external.as_ref().unwrap().external_id, "77");
+        assert_eq!(t.updated_at, before, "reidratar não é edição do usuário");
+    }
+
+    #[test]
+    fn apply_external_update_overwrites_owned_fields() {
+        let mut t = Task::new("título antigo").unwrap();
+        t.set_description("desc antiga").unwrap();
+        t.set_priority(Priority::Low);
+
+        let mut item = mastersys_item("991", "título novo");
+        item.description = "desc nova".into();
+        item.priority = Priority::Urgent;
+        item.deadline = Some(Utc::now());
+        item.completed = true;
+
+        t.apply_external_update(&item).unwrap();
+
+        assert_eq!(t.title, "título novo");
+        assert_eq!(t.description, "desc nova");
+        assert_eq!(t.priority, Priority::Urgent);
+        assert!(t.deadline.is_some());
+        assert!(t.completed);
+        assert_eq!(t.external.as_ref().unwrap().external_id, "991");
+    }
+
+    #[test]
+    fn apply_external_update_preserves_local_reminders() {
+        let mut t = Task::new("t").unwrap();
+        t.set_reminder_thresholds(vec![ReminderThreshold::Minutes(15)])
+            .unwrap();
+        t.apply_external_update(&mastersys_item("1", "vindo do mastersys"))
+            .unwrap();
+        assert_eq!(
+            t.reminder_thresholds,
+            vec![ReminderThreshold::Minutes(15)],
+            "lembretes são configuração local e não podem ser apagados por um sync"
+        );
+    }
+
+    #[test]
+    fn apply_external_update_rejects_invalid_payload() {
+        let mut t = Task::new("original").unwrap();
+        let mut item = mastersys_item("1", "ok");
+        item.title = "   ".into(); // adapter com bug / API devolvendo lixo
+        assert!(t.apply_external_update(&item).is_err());
+        assert_eq!(t.title, "original", "payload inválido não altera o estado");
+    }
+
     #[test]
     fn task_new_defaults() {
         let t = Task::new("Buy milk").unwrap();
@@ -553,6 +628,14 @@ pub struct Task {
     pub deadline: Option<DateTime<Utc>>,
     pub reminder_thresholds: Vec<ReminderThreshold>,
     pub completed: bool,
+    /// Origem externa, quando a tarefa espelha um item de um sistema de
+    /// suporte (ADR-006). `None` = tarefa puramente local — o caso padrão,
+    /// que continua funcionando sem nenhuma integração configurada.
+    ///
+    /// `serde(default)` mantém compatibilidade com payloads antigos do
+    /// frontend que não conhecem o campo.
+    #[serde(default)]
+    pub external: Option<ExternalRef>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -612,6 +695,7 @@ impl Task {
             deadline: None,
             reminder_thresholds: Vec::new(),
             completed: false,
+            external: None,
             created_at: now,
             updated_at: now,
         })
@@ -642,9 +726,47 @@ impl Task {
             deadline,
             reminder_thresholds,
             completed,
+            external: None,
             created_at,
             updated_at,
         })
+    }
+
+    /// Anexa (ou remove) a referência externa. Aditivo de propósito: manter a
+    /// assinatura de `reconstitute` evita quebrar os consumidores existentes
+    /// em `application` e `infrastructure` (Collaborative Rule 7).
+    ///
+    /// Não chama `touch()` — reidratar do banco não é uma edição do usuário.
+    pub fn attach_external(mut self, external: Option<ExternalRef>) -> Self {
+        self.external = external;
+        self
+    }
+
+    /// True quando a tarefa espelha um item de um sistema de suporte.
+    pub fn is_external(&self) -> bool {
+        self.external.is_some()
+    }
+
+    /// Aplica no estado local os campos que a origem externa é dona.
+    ///
+    /// Título, descrição, prioridade, prazo e conclusão pertencem à origem —
+    /// são sobrescritos a cada sincronização. Tudo o que o usuário criou no
+    /// MasterDesk (anotações da tarefa, lembretes configurados localmente)
+    /// não é tocado aqui, senão um sync apagaria trabalho do usuário.
+    pub fn apply_external_update(
+        &mut self,
+        item: &crate::external::ExternalWorkItem,
+    ) -> DomainResult<()> {
+        validate_task_title(&item.title)?;
+        validate_task_description(&item.description)?;
+        self.title = item.title.trim().to_string();
+        self.description = item.description.clone();
+        self.priority = item.priority;
+        self.deadline = item.deadline;
+        self.completed = item.completed;
+        self.external = Some(item.reference.clone());
+        self.touch();
+        Ok(())
     }
 
     pub fn set_title(&mut self, title: impl Into<String>) -> DomainResult<()> {

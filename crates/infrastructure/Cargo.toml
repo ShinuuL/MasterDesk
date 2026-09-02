@@ -15,6 +15,23 @@ chrono = { workspace = true }
 uuid = { workspace = true }
 thiserror = { workspace = true }
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "chrono", "uuid", "json"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 argon2 = { version = "0.5", features = ["std"] }
 password-hash = { version = "0.5", features = ["getrandom"] }
+
+# Integração Mastersys (ADR-006). Ver "Política de dependências" no ADR.
+#
+# reqwest: cliente HTTP. As features default de 0.13 já são `rustls` +
+# `rustls-platform-verifier`, ou seja TLS puro Rust validando contra a loja de
+# certificados do SO (schannel/Security.framework/CA bundle do Linux). Isso
+# atende CA corporativa em instalação self-hosted e dispensa OpenSSL no build.
+reqwest = { version = "0.13", features = ["json"] }
+
+# keyring 3.x: cofre nativo do SO para o refresh token (CLAUDE §11/13).
+# Fixado em 3.x de propósito — a 4.x migrou para `keyring-core` e exige
+# registrar o store explicitamente, com documentação ainda escassa.
+keyring = { version = "3.6", features = [
+    "apple-native",
+    "windows-native",
+    "sync-secret-service",
+] }

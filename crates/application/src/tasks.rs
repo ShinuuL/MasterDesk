@@ -225,6 +225,22 @@ mod tests {
 
     #[async_trait]
     impl TaskRepository for InMemoryTaskRepo {
+        // O quadro externo não é exercitado por estes testes (ver
+        // `mastersys.rs`), mas o trait exige os dois métodos.
+        async fn find_by_external(
+            &self,
+            _reference: &masterdesk_domain::ExternalRef,
+        ) -> DomainResult<Option<Task>> {
+            Ok(None)
+        }
+
+        async fn list_by_external_system(
+            &self,
+            _system: masterdesk_domain::ExternalSystem,
+        ) -> DomainResult<Vec<Task>> {
+            Ok(Vec::new())
+        }
+
         async fn save(&self, task: &Task) -> DomainResult<()> {
             self.store.lock().unwrap().insert(task.id, task.clone());
             Ok(())

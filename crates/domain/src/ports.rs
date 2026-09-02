@@ -6,6 +6,8 @@ use async_trait::async_trait;
 
 use crate::entities::{Note, NoteId, Task, TaskId, User};
 use crate::errors::DomainResult;
+use crate::external::{ExternalRef, ExternalWorkItem, SupportIdentity};
+use crate::task_notes::{TaskNote, TaskNoteId};
 
 #[async_trait]
 pub trait NoteRepository: Send + Sync {
@@ -26,6 +28,33 @@ pub trait TaskRepository: Send + Sync {
     async fn list_all(&self) -> DomainResult<Vec<Task>>;
     async fn list_overdue(&self) -> DomainResult<Vec<Task>>;
     async fn delete(&self, id: TaskId) -> DomainResult<()>;
+
+    /// Busca a tarefa que espelha um item externo, para que a sincronização
+    /// atualize em vez de duplicar. `None` quando o item ainda não foi
+    /// importado.
+    async fn find_by_external(&self, reference: &ExternalRef) -> DomainResult<Option<Task>>;
+
+    /// Todas as tarefas originadas em um sistema externo — usado pela
+    /// sincronização para detectar itens que saíram da fila do usuário.
+    async fn list_by_external_system(
+        &self,
+        system: crate::external::ExternalSystem,
+    ) -> DomainResult<Vec<Task>>;
+}
+
+/// Anotações pertencentes a uma tarefa. Separado de `TaskRepository` para
+/// manter os agregados pequenos e porque as anotações são consultadas sob
+/// demanda (ao expandir a tarefa), não junto da listagem do quadro.
+#[async_trait]
+pub trait TaskNoteRepository: Send + Sync {
+    async fn save(&self, note: &TaskNote) -> DomainResult<()>;
+    async fn find_by_id(&self, id: TaskNoteId) -> DomainResult<Option<TaskNote>>;
+    /// Anotações de uma tarefa, mais antigas primeiro (linha do tempo).
+    async fn list_by_task(&self, task_id: TaskId) -> DomainResult<Vec<TaskNote>>;
+    async fn count_by_task(&self, task_id: TaskId) -> DomainResult<u32>;
+    async fn delete(&self, id: TaskNoteId) -> DomainResult<()>;
+    /// Remove todas as anotações de uma tarefa (usado ao deletar a tarefa).
+    async fn delete_by_task(&self, task_id: TaskId) -> DomainResult<()>;
 }
 
 /// Agendamento/disparo de lembretes. A implementação concreta (Fase 3, ADR-004)
@@ -80,12 +109,36 @@ pub trait AuthenticationProvider: Send + Sync {
     async fn is_authenticated(&self) -> DomainResult<bool>;
 }
 
-/// Integração com sistema de suporte (Mastersys ou futuro). Nenhuma
-/// implementação concreta antes de ADR-006 (Fase 5) — ver seção 10 do
-/// CLAUDE.md: nunca implementar chamada real sem contrato validado.
+/// Integração com sistema de suporte (Mastersys ou futuro).
+///
+/// O contrato abaixo é deliberadamente **somente leitura**: o MasterDesk puxa
+/// os itens atribuídos ao usuário e não escreve nada de volta. Fechar chamado,
+/// comentar ou reatribuir continuam sendo feitos no sistema de origem — isso
+/// mantém o MasterDesk fora do caminho crítico do suporte e evita que um bug
+/// local altere registros de atendimento (seção 12/18 do CLAUDE.md).
+///
+/// A implementação concreta (`MastersysProvider`) vive em `infrastructure` e é
+/// a única que conhece endpoints, JWT e formato de JSON — ver ADR-006.
 #[async_trait]
 pub trait SupportSystemProvider: Send + Sync {
+    /// True quando há endpoint e sessão suficientes para sincronizar.
     async fn is_configured(&self) -> bool;
+
+    /// Autentica e persiste a sessão em armazenamento seguro do SO.
+    /// Retorna `DomainError::Unauthorized` para credenciais inválidas.
+    async fn authenticate(&self, identifier: &str, password: &str)
+        -> DomainResult<SupportIdentity>;
+
+    /// Identidade da sessão atual, se houver.
+    async fn current_identity(&self) -> DomainResult<Option<SupportIdentity>>;
+
+    /// Encerra a sessão e apaga as credenciais guardadas. Idempotente.
+    async fn sign_out(&self) -> DomainResult<()>;
+
+    /// Itens (tarefas e chamados) atribuídos ao usuário autenticado, já
+    /// normalizados para o vocabulário do domínio.
+    /// `DomainError::IntegrationNotConfigured` quando não há sessão.
+    async fn fetch_assigned_work(&self) -> DomainResult<Vec<ExternalWorkItem>>;
 }
 
 /// Provider de IA — papel consultivo apenas (seção 12 do CLAUDE.md).

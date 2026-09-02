@@ -6,7 +6,8 @@ pub mod window_service;
 use std::sync::Arc;
 
 use masterdesk_infrastructure::{
-    LocalAuthRepository, NotificationService, SqliteNoteRepository, SqliteTaskRepository,
+    LocalAuthRepository, MastersysProvider, NotificationService, SqliteNoteRepository,
+    SqliteSettingsRepository, SqliteTaskNoteRepository, SqliteTaskRepository,
 };
 use tauri::Manager;
 
@@ -30,106 +31,62 @@ pub fn run() {
                 // usar SqliteConnectOptions::filename lida corretamente com qualquer OS
                 // e evita o panic "unknown query parameter `create_if_missing`" que fazia
                 // o app abrir e fechar instantaneamente em release.
+                //
+                // `foreign_keys(true)`: SQLite desliga FK por conexão. Sem isso o
+                // ON DELETE CASCADE de `task_notes` (migration 0005) seria ignorado.
                 let opts = SqliteConnectOptions::new()
                     .filename(&db_path)
-                    .create_if_missing(true);
+                    .create_if_missing(true)
+                    .foreign_keys(true);
                 let pool = sqlx::SqlitePool::connect_with(opts)
                     .await
                     .expect("failed to connect sqlite");
-                // Garante schema — tenta migrations se o diretório existir, senão cria inline.
-                // Em produção o `.db` é criado via tauri-plugin-sql; aqui usamos sqlx direto.
-                let try_migrate = async {
-                    for candidate in ["./migrations", "../migrations", "../../migrations"] {
-                        if let Ok(m) =
-                            sqlx::migrate::Migrator::new(std::path::Path::new(candidate)).await
-                        {
-                            if m.run(&pool).await.is_ok() {
-                                return true;
-                            }
-                        }
-                    }
-                    false
-                }
-                .await;
-                if !try_migrate {
-                    // Fallback: cria tabelas notes + tasks diretamente
-                    // (útil em dev onde cwd é src-tauri)
-                    let _ = sqlx::query(
-                        r#"
-                        CREATE TABLE IF NOT EXISTS notes (
-                            id TEXT PRIMARY KEY,
-                            title TEXT NOT NULL,
-                            content TEXT NOT NULL DEFAULT '',
-                            tags TEXT NOT NULL DEFAULT '[]',
-                            priority TEXT NOT NULL DEFAULT 'Medium',
-                            deadline TEXT,
-                            color TEXT NOT NULL DEFAULT '#FFEB3B',
-                            opacity REAL NOT NULL DEFAULT 1.0,
-                            pinned INTEGER NOT NULL DEFAULT 0,
-                            always_on_top INTEGER NOT NULL DEFAULT 0,
-                            archived INTEGER NOT NULL DEFAULT 0,
-                            position_x REAL NOT NULL DEFAULT 100.0,
-                            position_y REAL NOT NULL DEFAULT 100.0,
-                            size_w REAL NOT NULL DEFAULT 300.0,
-                            size_h REAL NOT NULL DEFAULT 250.0,
-                            created_at TEXT NOT NULL,
-                            updated_at TEXT NOT NULL
-                        )
-                        "#,
-                    )
-                    .execute(&pool)
-                    .await;
 
-                    let _ = sqlx::query(
-                        r#"
-                        CREATE TABLE IF NOT EXISTS tasks (
-                            id TEXT PRIMARY KEY,
-                            title TEXT NOT NULL,
-                            description TEXT NOT NULL DEFAULT '',
-                            priority TEXT NOT NULL DEFAULT 'Medium',
-                            deadline TEXT,
-                            reminder_thresholds TEXT NOT NULL DEFAULT '[]',
-                            completed INTEGER NOT NULL DEFAULT 0,
-                            created_at TEXT NOT NULL,
-                            updated_at TEXT NOT NULL
-                        )
-                        "#,
-                    )
-                    .execute(&pool)
-                    .await;
+                // Migrations EMBUTIDAS no binário em tempo de compilação.
+                //
+                // Antes daqui o setup tentava `Migrator::new("./migrations")` em
+                // caminhos relativos e, quando nenhum existia (o caso em release,
+                // porque `migrations/` não é empacotado), caía num fallback que
+                // recriava `notes`/`tasks`/`users` inline. Isso significava que
+                // qualquer migration nova só se aplicava em dev, e o schema de
+                // produção divergia silenciosamente do dos arquivos .sql.
+                //
+                // `migrate!` resolve os dois problemas: o SQL vai para dentro do
+                // executável e o mesmo caminho de código roda em dev e release.
+                // Bancos criados pelo fallback antigo têm `_sqlx_migrations`
+                // vazio, então 0001..0004 reexecutam — são todos
+                // CREATE ... IF NOT EXISTS, portanto idempotentes.
+                sqlx::migrate!("../migrations")
+                    .run(&pool)
+                    .await
+                    .expect("failed to run database migrations");
 
-                    let _ = sqlx::query(
-                        r#"
-                        CREATE TABLE IF NOT EXISTS users (
-                            id            TEXT PRIMARY KEY,
-                            username      TEXT NOT NULL COLLATE NOCASE UNIQUE CHECK (length(username) >= 3 AND length(username) <= 32),
-                            password_hash TEXT NOT NULL,
-                            created_at    TEXT NOT NULL
-                        )
-                        "#,
-                    )
-                    .execute(&pool)
-                    .await;
-                }
                 pool
             });
 
             let repo = Arc::new(SqliteNoteRepository::new(pool.clone()));
             let task_repo = Arc::new(SqliteTaskRepository::new(pool.clone()));
+            let task_note_repo = Arc::new(SqliteTaskNoteRepository::new(pool.clone()));
             let notification_service = Arc::new(NotificationService::new());
-            let auth_repo = Arc::new(LocalAuthRepository::new(pool));
+            let auth_repo = Arc::new(LocalAuthRepository::new(pool.clone()));
+            let settings_repo = Arc::new(SqliteSettingsRepository::new(pool));
+            // O provider só faz rede quando um comando pede; construí-lo aqui
+            // não abre conexão nem lê o cofre.
+            let mastersys = Arc::new(MastersysProvider::new(settings_repo.clone()));
             app.manage(commands::AppState {
                 repo,
                 task_repo,
+                task_note_repo,
                 notification_service,
                 auth_repo,
+                settings_repo,
+                mastersys,
             });
 
             // ---- System tray (Tauri 2 native) ----
-            let show_item = tauri::menu::MenuItemBuilder::with_id("show", "Mostrar MasterDesk")
-                .build(app)?;
-            let quit_item =
-                tauri::menu::MenuItemBuilder::with_id("quit", "Sair").build(app)?;
+            let show_item =
+                tauri::menu::MenuItemBuilder::with_id("show", "Mostrar MasterDesk").build(app)?;
+            let quit_item = tauri::menu::MenuItemBuilder::with_id("quit", "Sair").build(app)?;
             let menu = tauri::menu::MenuBuilder::new(app)
                 .item(&show_item)
                 .item(&quit_item)
@@ -211,7 +168,18 @@ pub fn run() {
             commands::auth_register,
             commands::auth_login,
             commands::auth_logout,
-            commands::auth_is_authenticated
+            commands::auth_is_authenticated,
+            commands::add_task_note,
+            commands::list_task_notes,
+            commands::count_task_notes,
+            commands::update_task_note,
+            commands::set_task_note_done,
+            commands::delete_task_note,
+            commands::mastersys_status,
+            commands::mastersys_set_endpoint,
+            commands::mastersys_connect,
+            commands::mastersys_disconnect,
+            commands::mastersys_sync
         ])
         // .plugin(tauri_plugin_notification::init())                 // Fase 3 (ADR-004)
         .run(tauri::generate_context!())

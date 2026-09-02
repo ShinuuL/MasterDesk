@@ -1,17 +1,20 @@
-//! Comandos Tauri para Notes (Fase 2), Tasks (Fase 3) e Auth (Fase 4).
-//! Cada comando delega para `masterdesk-application::NoteService` / `TaskService`
-//! / `AuthService` que orquestra validação de domínio + persistência.
+//! Comandos Tauri para Notes (Fase 2), Tasks (Fase 3), Auth (Fase 4),
+//! anotações de tarefa e integração Mastersys (ADR-006).
+//! Cada comando delega para um serviço de `masterdesk-application` que
+//! orquestra validação de domínio + persistência.
 
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use masterdesk_application::{
-    AuthService, CreateNoteInput, CreateTaskInput, CreateUserInput, LoginInput, UpdateNoteInput,
+    AuthService, CreateNoteInput, CreateTaskInput, CreateUserInput, LoginInput,
+    MastersysSyncService, SyncOptions, SyncReport, TaskNoteService, UpdateNoteInput,
     UpdateTaskInput, UserView,
 };
-use masterdesk_domain::{Note, Priority, ReminderThreshold, Task};
+use masterdesk_domain::{Note, Priority, ReminderThreshold, SupportIdentity, Task, TaskNote};
 use masterdesk_infrastructure::{
-    LocalAuthRepository, NotificationService, SqliteNoteRepository, SqliteTaskRepository,
+    LocalAuthRepository, MastersysProvider, NotificationService, SqliteNoteRepository,
+    SqliteSettingsRepository, SqliteTaskNoteRepository, SqliteTaskRepository,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
@@ -23,8 +26,11 @@ use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
 pub struct AppState {
     pub repo: Arc<SqliteNoteRepository>,
     pub task_repo: Arc<SqliteTaskRepository>,
+    pub task_note_repo: Arc<SqliteTaskNoteRepository>,
     pub notification_service: Arc<NotificationService>,
     pub auth_repo: Arc<LocalAuthRepository>,
+    pub settings_repo: Arc<SqliteSettingsRepository>,
+    pub mastersys: Arc<MastersysProvider>,
 }
 
 fn note_service(state: &State<'_, AppState>) -> masterdesk_application::NoteService {
@@ -40,6 +46,24 @@ fn task_service(state: &State<'_, AppState>) -> masterdesk_application::TaskServ
     let ns: Arc<dyn masterdesk_domain::ports::NotificationService> =
         state.notification_service.clone();
     masterdesk_application::TaskService::new(task_repo, Some(ns))
+}
+
+fn task_note_service(state: &State<'_, AppState>) -> TaskNoteService {
+    let task_repo: Arc<dyn masterdesk_domain::ports::TaskRepository> = state.task_repo.clone();
+    let note_repo: Arc<dyn masterdesk_domain::ports::TaskNoteRepository> =
+        state.task_note_repo.clone();
+    TaskNoteService::new(task_repo, note_repo)
+}
+
+fn mastersys_service(state: &State<'_, AppState>) -> MastersysSyncService {
+    let provider: Arc<dyn masterdesk_domain::ports::SupportSystemProvider> =
+        state.mastersys.clone();
+    let task_repo: Arc<dyn masterdesk_domain::ports::TaskRepository> = state.task_repo.clone();
+    let note_repo: Arc<dyn masterdesk_domain::ports::TaskNoteRepository> =
+        state.task_note_repo.clone();
+    let ns: Arc<dyn masterdesk_domain::ports::NotificationService> =
+        state.notification_service.clone();
+    MastersysSyncService::new(provider, task_repo, note_repo, Some(ns))
 }
 
 fn auth_service(state: &State<'_, AppState>) -> AuthService {
@@ -629,4 +653,178 @@ pub async fn auth_logout(state: State<'_, AppState>) -> Result<(), String> {
 pub async fn auth_is_authenticated(state: State<'_, AppState>) -> Result<bool, String> {
     let svc = auth_service(&state);
     svc.is_authenticated().await.map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Anotações dentro de tarefas
+// ---------------------------------------------------------------------------
+
+fn parse_uuid(id: &str) -> Result<uuid::Uuid, String> {
+    id.parse::<uuid::Uuid>()
+        .map_err(|_| "identificador inválido".to_string())
+}
+
+#[tauri::command]
+pub async fn add_task_note(
+    state: State<'_, AppState>,
+    task_id: String,
+    content: String,
+) -> Result<TaskNote, String> {
+    task_note_service(&state)
+        .add_note(parse_uuid(&task_id)?, content)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn list_task_notes(
+    state: State<'_, AppState>,
+    task_id: String,
+) -> Result<Vec<TaskNote>, String> {
+    task_note_service(&state)
+        .list_notes(parse_uuid(&task_id)?)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn count_task_notes(state: State<'_, AppState>, task_id: String) -> Result<u32, String> {
+    task_note_service(&state)
+        .count_notes(parse_uuid(&task_id)?)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn update_task_note(
+    state: State<'_, AppState>,
+    id: String,
+    content: String,
+) -> Result<TaskNote, String> {
+    task_note_service(&state)
+        .update_note(parse_uuid(&id)?, content)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_task_note_done(
+    state: State<'_, AppState>,
+    id: String,
+    done: bool,
+) -> Result<TaskNote, String> {
+    task_note_service(&state)
+        .set_note_done(parse_uuid(&id)?, done)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_task_note(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    task_note_service(&state)
+        .delete_note(parse_uuid(&id)?)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Integração Mastersys (ADR-006) — somente leitura
+// ---------------------------------------------------------------------------
+
+/// Estado da integração para a UI. **Nunca** inclui token ou senha
+/// (CLAUDE §13: "Never log secrets" — e nunca devolvê-los ao frontend).
+#[derive(Debug, Serialize)]
+pub struct MastersysStatus {
+    /// Endpoint salvo, se houver. É configuração, não segredo.
+    pub endpoint: Option<String>,
+    /// True quando há endpoint + sessão + usuário — ou seja, dá para sincronizar.
+    pub connected: bool,
+    /// Identidade do usuário na origem, para a UI mostrar quem está conectado.
+    pub identity: Option<SupportIdentity>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SyncReportPayload {
+    pub imported: u32,
+    pub updated: u32,
+    pub removed: u32,
+    pub kept_with_notes: u32,
+}
+
+impl From<SyncReport> for SyncReportPayload {
+    fn from(r: SyncReport) -> Self {
+        Self {
+            imported: r.imported,
+            updated: r.updated,
+            removed: r.removed,
+            kept_with_notes: r.kept_with_notes,
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn mastersys_status(state: State<'_, AppState>) -> Result<MastersysStatus, String> {
+    let endpoint = state
+        .mastersys
+        .base_url()
+        .await
+        .map_err(|e| e.to_string())?;
+    let svc = mastersys_service(&state);
+    Ok(MastersysStatus {
+        endpoint,
+        connected: svc.is_configured().await,
+        identity: svc.current_identity().await.map_err(|e| e.to_string())?,
+    })
+}
+
+#[tauri::command]
+pub async fn mastersys_set_endpoint(
+    state: State<'_, AppState>,
+    endpoint: String,
+) -> Result<(), String> {
+    state
+        .mastersys
+        .set_base_url(&endpoint)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Autentica no Mastersys. A senha é usada e descartada: só o refresh token
+/// vai para o cofre do SO (`SecretStore`), nunca a senha.
+#[tauri::command]
+pub async fn mastersys_connect(
+    state: State<'_, AppState>,
+    identifier: String,
+    password: String,
+) -> Result<SupportIdentity, String> {
+    mastersys_service(&state)
+        .connect(&identifier, &password)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn mastersys_disconnect(state: State<'_, AppState>) -> Result<SyncReportPayload, String> {
+    mastersys_service(&state)
+        .disconnect()
+        .await
+        .map(SyncReportPayload::from)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn mastersys_sync(
+    state: State<'_, AppState>,
+    default_reminders: Option<Vec<i64>>,
+) -> Result<SyncReportPayload, String> {
+    let default_reminders = default_reminders
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(threshold_minutes_to_enum)
+        .collect();
+    mastersys_service(&state)
+        .sync(SyncOptions { default_reminders })
+        .await
+        .map(SyncReportPayload::from)
+        .map_err(|e| e.to_string())
 }
