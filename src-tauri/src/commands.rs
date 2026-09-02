@@ -346,21 +346,18 @@ pub async fn open_note_window(
         .inner_size(w, h)
         .position(x, y)
         .resizable(true)
-        // P3 — estratégia escolhida: manter janela OPAQUE (transparent(false))
-        // e REMOVER `html.note-window-body{background:transparent}` do
-        // styles.css. `decorations(true)` mantém moldura nativa (drag/resize/X).
-        // `visible(false)` + `show()` após o build evita o flash branco ao
-        // abrir (Issues #14831/14515/8308). Nota: no Windows `shadow(false)`
-        // não tem efeito em janela decorada (sombras sempre ON) — mantido por
-        // consistência cross-platform.
-        .decorations(true)
-        .transparent(false)
+        // P3 — janela frameless sticky: transparente, sem moldura, sempre visível.
+        // Esconder moldura novamente (pedido do DEV) após debug com decorations.
+        // `transparent(true)` + `decorations(false)` + `shadow(false)` + `visible(false)` + `show()`
+        // evita flash branco (Issues #14831/14515/8308). Skip_taskbar true para não poluir barra.
+        .decorations(false)
+        .transparent(true)
         .shadow(false)
         // always_on_top: janela de nota é on-top por padrão (pin). O estado
         // persistido `note.always_on_top` é aplicado pelo frontend via
         // `set_note_window_always_on_top` quando o usuário alterna o toggle.
         .always_on_top(true)
-        .skip_taskbar(false)
+        .skip_taskbar(true)
         .visible(false)
         .initialization_script(format!(
             "window.__NOTE_ID__={id_literal};console.log('note-window init', window.__NOTE_ID__, location.href);"
