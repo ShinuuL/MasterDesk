@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "note-windows",
+  "description": "Permissions para a janela principal e as janelas dedicadas de nota (pop-out). Sem esta capability a API core (core:window/core:event) fica bloqueada no frontend — causava falha silenciosa em getCurrentWindow().close()/onMoved/onResized (P5).",
+  "windows": ["main", "note-*"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:webview:default",
+    "core:event:default"
+  ]
+}

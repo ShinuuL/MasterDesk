@@ -1,0 +1,888 @@
+/* MasterDesk — design system
+   ===========================================================================
+   Identidade: "warm desk". No claro, papel morno (#FDFCF8) sobre uma mesa
+   levemente mais fria (#F6F5F1), tinta quase-preta e um único acento amarelo
+   de post-it. No escuro, a MESMA mesa sob uma lâmpada: carvão morno em vez de
+   cinza-azulado, e o amarelo continua sendo a única fonte de luz.
+
+   O tema escuro não é o claro invertido. `--ink` era, ao mesmo tempo, a cor do
+   texto E o fundo da barra de navegação e dos botões sólidos. Invertido, isso
+   produziria nav branca e botão branco-no-branco. Por isso os tokens abaixo
+   são divididos por PAPEL, não por valor:
+
+     texto        --text --text-muted --text-faint
+     superfícies  --canvas --surface --surface-2
+     traços       --line --line-strong
+     chrome       --chrome --chrome-text  (nav: escura nos DOIS temas — é a
+                  faixa que faz o app ser reconhecível)
+     ação         --action --action-text  (botão sólido)
+     acento       --accent --accent-ink --accent-veil
+
+   Tipografia: system-ui em 11/12/13/14/16/20 com tracking apertado nos
+   títulos, mais um papel monoespaçado para horário, número de chamado e
+   contadores — suporte/ERP é feito de identificadores, e alinhá-los em
+   tabular ajuda a varrer a lista.
+   =========================================================================== */
+
+:root{
+  color-scheme: light;
+
+  /* Texto */
+  --text:#0F1115;
+  --text-strong:#000;
+  --text-muted:#6B7280;
+  --text-faint:#9AA0A6;
+
+  /* Superfícies */
+  --canvas:#F6F5F1;
+  --canvas-dot:#E8E6E1;
+  --surface:#FDFCF8;
+  --surface-plain:#FFFFFF;
+  --surface-2:#F2F1EC;
+
+  /* Traços */
+  --line:#E8E6E1;
+  --line-strong:#DAD8D3;
+
+  /* Chrome (nav) — escura nos dois temas */
+  --chrome:#0F1115;
+  --chrome-text:#FFFFFF;
+  --chrome-line:rgba(255,255,255,.10);
+  --chrome-line-hover:rgba(255,255,255,.24);
+  --chrome-text-dim:rgba(255,255,255,.66);
+
+  /* Ação sólida */
+  --action:#0F1115;
+  --action-hover:#1C1F26;
+  --action-text:#FFFFFF;
+  --action-disabled:#D1D5DB;
+
+  /* Acento */
+  --accent:#FFEB3B;
+  --accent-ink:#0F1115;
+  --accent-veil:rgba(255,235,59,.18);
+
+  /* Estados */
+  --danger:#B91C1C;
+  --danger-strong:#991B1B;
+  --danger-surface:#FEF2F2;
+  --danger-line:#FECACA;
+  --danger-mark:#DC2626;
+  --warn:#92400E;
+  --warn-surface:#FFFEF7;
+  --warn-mark:#F59E0B;
+  --ok:#15803D;
+  --overdue-surface:#FFFBFB;
+
+  /* Prioridades — usadas também pelo TS via getComputedStyle não é
+     necessário; ficam aqui para os cards e badges do CSS. */
+  --prio-low:#6B7280;
+  --prio-medium:#3B5BFF;
+  --prio-high:#EA580C;
+  --prio-urgent:#DC2626;
+
+  /* Forma */
+  --radius-sm:8px;
+  --radius-md:12px;
+  --radius-lg:16px;
+  --radius-pill:999px;
+
+  /* Profundidade */
+  --shadow-xs:0 1px 2px rgba(15,17,21,.05);
+  --shadow-sm:0 1px 3px rgba(15,17,21,.07), 0 1px 2px rgba(15,17,21,.06);
+  --shadow-md:0 4px 16px rgba(15,17,21,.08), 0 2px 6px rgba(15,17,21,.06);
+  --shadow-lg:0 12px 32px rgba(15,17,21,.13), 0 4px 12px rgba(15,17,21,.09);
+  --inset-top:inset 0 1px 0 rgba(255,255,255,.9);
+  --inset-bottom:inset 0 -1px 0 rgba(15,17,21,.04);
+
+  --focus:0 0 0 3px rgba(255,235,59,.55), 0 0 0 4px var(--text);
+
+  --font-mono:ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* Tema escuro. Só os tokens mudam — nenhum componente tem regra própria de
+   tema, o que impede o par claro/escuro de divergir com o tempo. */
+:root[data-theme="dark"]{
+  color-scheme: dark;
+
+  --text:#F2F0EA;
+  --text-strong:#FFFFFF;
+  --text-muted:#A0A0A0;
+  --text-faint:#6F7075;
+
+  --canvas:#101113;
+  --canvas-dot:#25262A;
+  --surface:#191A1D;
+  --surface-plain:#1E1F23;
+  --surface-2:#232428;
+
+  --line:#2B2D31;
+  --line-strong:#3A3C41;
+
+  /* Um degrau MAIS escuro que o canvas: no escuro, chrome mais clara pareceria
+     um painel flutuante, não a moldura do app. */
+  --chrome:#08090A;
+  --chrome-text:#F2F0EA;
+  --chrome-line:rgba(255,255,255,.09);
+  --chrome-line-hover:rgba(255,255,255,.22);
+  --chrome-text-dim:rgba(242,240,234,.60);
+
+  /* Botão sólido não pode ser quase-preto sobre fundo escuro: aqui o papel de
+     "ação" passa para o acento, que é o único elemento luminoso do tema. */
+  --action:#FFEB3B;
+  --action-hover:#FFF176;
+  --action-text:#0F1115;
+  --action-disabled:#3A3C41;
+
+  --accent:#FFEB3B;
+  --accent-ink:#0F1115;
+  --accent-veil:rgba(255,235,59,.14);
+
+  --danger:#F87171;
+  --danger-strong:#FCA5A5;
+  --danger-surface:#2A1618;
+  --danger-line:#5B2326;
+  --danger-mark:#EF4444;
+  --warn:#FBBF24;
+  --warn-surface:#241E10;
+  --warn-mark:#D97706;
+  --ok:#4ADE80;
+  --overdue-surface:#231517;
+
+  --prio-low:#8B8D93;
+  --prio-medium:#7C93FF;
+  --prio-high:#FB923C;
+  --prio-urgent:#F87171;
+
+  /* No escuro a sombra some; o que separa camadas é um fio de luz no topo. */
+  --shadow-xs:0 1px 2px rgba(0,0,0,.5);
+  --shadow-sm:0 1px 3px rgba(0,0,0,.55), 0 1px 2px rgba(0,0,0,.4);
+  --shadow-md:0 6px 20px rgba(0,0,0,.55), 0 2px 6px rgba(0,0,0,.45);
+  --shadow-lg:0 16px 40px rgba(0,0,0,.6), 0 6px 14px rgba(0,0,0,.5);
+  --inset-top:inset 0 1px 0 rgba(255,255,255,.06);
+  --inset-bottom:inset 0 -1px 0 rgba(0,0,0,.35);
+
+  --focus:0 0 0 3px rgba(255,235,59,.5), 0 0 0 4px #08090A;
+}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  background:var(--surface);
+  color:var(--text);
+  font-family:system-ui, -apple-system, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  line-height:1.5;
+}
+
+button, input, select, textarea{font:inherit; color:inherit}
+
+/* Números que se alinham em coluna: horário, contador, id de chamado. */
+.md-mono{
+  font-family:var(--font-mono);
+  font-variant-numeric:tabular-nums;
+  font-feature-settings:"tnum" 1;
+}
+
+/* Acessibilidade: foco visível */
+:focus-visible{
+  outline:2px solid var(--text);
+  outline-offset:2px;
+  box-shadow:var(--focus);
+}
+button:focus-visible, a:focus-visible{outline-offset:2px}
+
+/* Scroll invisível mas funcional — requisito principal */
+.scroll-hidden{
+  overflow:auto;
+  scrollbar-width:none;            /* Firefox */
+  -ms-overflow-style:none;         /* IE/Edge */
+  scrollbar-gutter:stable;         /* mantém layout */
+}
+.scroll-hidden::-webkit-scrollbar{
+  display:none;
+  width:0;
+  height:0;
+  -webkit-appearance:none;
+}
+@supports (overflow:overlay){
+  .scroll-hidden{ overflow:overlay }
+}
+
+/* Canvas com grid de pontinhos — assinatura visual "mesa" */
+.canvas-desk{
+  background-color:var(--canvas);
+  background-image: radial-gradient(circle, var(--canvas-dot) 1px, transparent 1.2px);
+  background-size:22px 22px;
+  background-position:-1px -1px;
+  position:relative;
+}
+.canvas-desk::after{
+  content:"";
+  position:absolute; inset:0;
+  pointer-events:none;
+  box-shadow:var(--inset-top), var(--inset-bottom);
+}
+
+/* ---------------------------------------------------------------------------
+   Top nav
+--------------------------------------------------------------------------- */
+.md-nav{
+  display:flex; align-items:center; gap:12px;
+  height:48px; padding:0 14px;
+  background:var(--chrome);
+  color:var(--chrome-text);
+  border-bottom:1px solid var(--chrome-line);
+  position:relative; z-index:20;
+}
+.md-brand{
+  display:flex; align-items:center; gap:10px;
+  font-weight:700; letter-spacing:-.02em; font-size:14px;
+}
+.md-brand-mark{
+  width:28px; height:28px; border-radius:8px;
+  background:var(--accent); color:var(--accent-ink);
+  display:grid; place-items:center;
+  font-weight:800; font-size:13px; line-height:1;
+  box-shadow:0 1px 0 rgba(0,0,0,.2);
+}
+.md-brand small{font-weight:500; opacity:.7; font-size:11px; letter-spacing:.04em; text-transform:uppercase}
+.md-tabs{display:flex; gap:6px; margin-left:8px}
+.md-tab{
+  padding:7px 14px; border-radius:var(--radius-pill);
+  border:1px solid var(--chrome-line);
+  background:transparent; color:var(--chrome-text-dim);
+  cursor:pointer; font-weight:600; font-size:13px;
+  transition:background .15s ease, color .15s ease, border-color .15s ease;
+  min-height:32px;
+}
+.md-tab[aria-selected="true"]{
+  background:var(--chrome-text); color:var(--chrome);
+  border-color:var(--chrome-text);
+  box-shadow:var(--shadow-sm);
+}
+.md-tab:hover{border-color:var(--chrome-line-hover); color:var(--chrome-text)}
+.md-tab[aria-selected="true"]:hover{color:var(--chrome)}
+.md-nav-right{
+  margin-left:auto; display:flex; align-items:center; gap:10px;
+  font-size:12px; color:var(--chrome-text-dim);
+}
+.md-nav-user{display:flex; align-items:center; gap:6px}
+.md-nav-dot{
+  width:7px; height:7px; border-radius:50%;
+  background:var(--accent); display:inline-block;
+  box-shadow:0 0 0 4px var(--accent-veil);
+}
+.md-nav-sep{opacity:.4}
+
+/* Seletor de tema — controle segmentado de 3 estados na chrome */
+.md-theme-toggle{
+  display:inline-flex; align-items:center;
+  padding:2px; gap:2px;
+  border-radius:var(--radius-pill);
+  border:1px solid var(--chrome-line);
+  background:rgba(255,255,255,.04);
+}
+.md-theme-btn{
+  display:grid; place-items:center;
+  width:28px; height:24px;
+  border:none; background:transparent;
+  color:var(--chrome-text-dim);
+  border-radius:var(--radius-pill);
+  cursor:pointer;
+  transition:background .15s ease, color .15s ease;
+}
+.md-theme-btn:hover{color:var(--chrome-text); background:rgba(255,255,255,.08)}
+.md-theme-btn[aria-pressed="true"]{
+  background:var(--accent); color:var(--accent-ink);
+}
+.md-theme-btn svg{display:block}
+
+/* ---------------------------------------------------------------------------
+   Headers de board
+--------------------------------------------------------------------------- */
+.md-board-header{
+  display:flex; gap:10px; align-items:center;
+  padding:10px 14px;
+  background:var(--surface);
+  /* Progressive enhancement: onde `color-mix` existe, o header fica
+     translúcido sobre o grid de pontos; onde não, fica opaco (nunca some). */
+  background:color-mix(in srgb, var(--surface) 85%, transparent);
+  backdrop-filter:saturate(1.2) blur(8px);
+  -webkit-backdrop-filter:saturate(1.2) blur(8px);
+  border-bottom:1px solid var(--line);
+  position:sticky; top:0; z-index:5;
+}
+.md-board-title{font-size:14px; letter-spacing:-.02em; font-weight:700}
+.md-search{position:relative; flex:0 1 280px; display:flex; align-items:center}
+.md-search input{
+  width:100%; padding:8px 10px 8px 32px;
+  border-radius:var(--radius-pill);
+  border:1px solid var(--line-strong);
+  background:var(--surface-plain);
+  font-size:13px; color:var(--text);
+  transition:border-color .15s, box-shadow .15s;
+}
+.md-search input::placeholder{color:var(--text-faint)}
+.md-search input:focus{border-color:var(--text); box-shadow:0 0 0 3px var(--accent-veil)}
+.md-search svg{position:absolute; left:10px; pointer-events:none; opacity:.55}
+.md-count{
+  margin-left:auto;
+  font-size:12px; font-weight:600; letter-spacing:.02em;
+  color:var(--text-muted);
+  background:var(--surface-plain); border:1px solid var(--line);
+  padding:4px 9px; border-radius:var(--radius-pill);
+}
+
+/* ---------------------------------------------------------------------------
+   Barra de criação e campos
+--------------------------------------------------------------------------- */
+.md-create-bar{
+  display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;
+  padding:12px 14px;
+  background:var(--surface-plain);
+  border-bottom:1px solid var(--line);
+}
+.md-field{display:flex; flex-direction:column; gap:5px}
+.md-field label, .md-eyebrow{
+  font-size:11px; font-weight:700; letter-spacing:.06em;
+  text-transform:uppercase; color:var(--text-muted);
+}
+.md-input, .md-select, .md-textarea{
+  padding:9px 11px; border-radius:10px;
+  border:1px solid var(--line-strong);
+  background:var(--surface-plain); font-size:13px; color:var(--text);
+  transition:border-color .15s, box-shadow .15s, background .15s;
+  min-height:36px;
+}
+.md-input::placeholder, .md-textarea::placeholder{color:var(--text-faint)}
+.md-input:focus, .md-select:focus, .md-textarea:focus{
+  border-color:var(--text); box-shadow:0 0 0 3px var(--accent-veil); outline:none;
+}
+.md-textarea{resize:vertical; line-height:1.5; font-family:inherit}
+.md-primary{
+  padding:10px 16px; border-radius:var(--radius-pill);
+  background:var(--action); color:var(--action-text); border:1px solid var(--action);
+  font-weight:700; font-size:13px; letter-spacing:-.01em;
+  cursor:pointer; min-height:38px; min-width:44px;
+  box-shadow:var(--shadow-sm);
+  transition:transform .12s, background .15s, box-shadow .15s;
+}
+.md-primary:hover{background:var(--action-hover); border-color:var(--action-hover); transform:translateY(-1px); box-shadow:var(--shadow-md)}
+.md-primary:active{transform:translateY(0)}
+.md-primary:disabled{
+  /* `--action-disabled` + texto `--surface-plain` deixava o rótulo ilegível no
+     tema escuro (dois tons de cinza quase iguais). Desabilitado não precisa de
+     AA, mas precisa ser LEGÍVEL — senão o usuário não sabe o que o botão faz. */
+  background:var(--surface-2); border-color:var(--line-strong);
+  color:var(--text-faint); cursor:not-allowed; transform:none; box-shadow:none;
+}
+/* O ponto de acento só faz sentido quando a ação é escura; no tema escuro o
+   botão JÁ é o acento, então esconde para não virar amarelo sobre amarelo. */
+.md-primary-accent{position:relative}
+.md-primary-accent::after{
+  content:""; position:absolute; right:10px; top:50%; transform:translateY(-50%);
+  width:7px; height:7px; border-radius:50%; background:var(--accent);
+  box-shadow:0 0 0 2px rgba(15,17,21,.08);
+  opacity:0;
+}
+.md-primary:not(:disabled).md-primary-accent::after{opacity:1}
+:root[data-theme="dark"] .md-primary-accent::after{display:none}
+
+/* Chips / toggles */
+.md-toggle{
+  display:inline-flex; align-items:center; gap:7px;
+  font-size:13px; font-weight:500; color:var(--text);
+  user-select:none; cursor:pointer;
+}
+.md-toggle input{accent-color:var(--accent)}
+input[type="range"]{accent-color:var(--accent)}
+input[type="checkbox"]{accent-color:var(--accent)}
+
+/* Chip selecionável (thresholds de lembrete) */
+.md-chip{
+  padding:5px 10px; border-radius:var(--radius-pill);
+  border:1px solid var(--line-strong);
+  background:var(--surface-plain); color:var(--text);
+  font-size:12px; font-weight:600; cursor:pointer; min-height:30px;
+  transition:all .15s;
+}
+.md-chip:hover{border-color:var(--text)}
+.md-chip[aria-pressed="true"]{
+  background:var(--action); color:var(--action-text); border-color:var(--action);
+}
+
+/* ---------------------------------------------------------------------------
+   Feedback
+--------------------------------------------------------------------------- */
+.md-alert{
+  margin:10px 14px; padding:10px 12px;
+  background:var(--danger-surface); border:1px solid var(--danger-line);
+  color:var(--danger-strong);
+  border-radius:10px; font-size:13px; line-height:1.4;
+}
+.md-alert--ok{
+  background:var(--surface);
+  border-color:var(--line);
+  color:var(--ok);
+  background:color-mix(in srgb, var(--ok) 12%, var(--surface));
+  border-color:color-mix(in srgb, var(--ok) 40%, var(--surface));
+}
+.md-alert-dismiss{
+  margin-left:8px; background:transparent; border:none;
+  text-decoration:underline; cursor:pointer; color:inherit; font-size:12px;
+}
+
+/* Empty state — sem scrollbar */
+.md-empty{
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  text-align:center;
+  padding:32px 20px;
+  flex:1; min-height:280px;
+  gap:12px;
+}
+.md-empty-illus{
+  width:84px; height:84px; border-radius:20px;
+  background:var(--surface-plain); border:1px dashed var(--line-strong);
+  display:grid; place-items:center;
+  box-shadow:var(--shadow-sm);
+  position:relative;
+}
+.md-empty-illus::after{
+  /* Antes era um bloco de acento sólido, que no tema escuro virava o elemento
+     mais pesado da tela inteira num estado que deveria ser calmo. Agora é o
+     mesmo grid de pontos do canvas, em acento e translúcido: lê como "mesa
+     vazia", que é exatamente a mensagem do estado vazio. */
+  content:""; position:absolute; inset:9px;
+  border-radius:13px;
+  background-image:radial-gradient(circle, var(--accent) 1px, transparent 1.3px);
+  background-size:8px 8px;
+  opacity:.4;
+}
+.md-empty h3{margin:0; font-size:16px; letter-spacing:-.02em; font-weight:750}
+.md-empty p{margin:0; max-width:36ch; font-size:13px; color:var(--text-muted); line-height:1.5}
+.md-empty-hint{font-size:12px; color:var(--text-muted); margin-top:2px}
+.md-empty-cta{
+  margin-top:4px; padding:9px 14px; border-radius:var(--radius-pill);
+  background:var(--surface-plain); border:1px solid var(--line-strong); color:var(--text);
+  font-weight:600; font-size:13px; cursor:pointer;
+  box-shadow:var(--shadow-xs);
+  transition:all .15s;
+}
+.md-empty-cta:hover{border-color:var(--text); transform:translateY(-1px); box-shadow:var(--shadow-sm)}
+.md-empty-cta--primary{background:var(--action); color:var(--action-text); border-color:var(--action)}
+.md-empty-cta--primary:hover{background:var(--action-hover)}
+
+/* Skeleton */
+@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+.md-skeleton{
+  height:56px; border-radius:12px; margin:10px 14px;
+  background:linear-gradient(90deg, var(--surface-2) 25%, var(--canvas) 37%, var(--surface-2) 63%);
+  background-size:400% 100%; animation:shimmer 1.2s ease-in-out infinite;
+}
+
+/* Placeholder discreto — "nenhuma pendente", "nenhuma anotação" */
+.md-quiet{
+  background:var(--surface-plain); border:1px dashed var(--line-strong);
+  border-radius:12px; padding:14px;
+  font-size:13px; color:var(--text-muted);
+}
+
+/* ---------------------------------------------------------------------------
+   Task card
+--------------------------------------------------------------------------- */
+.md-task{
+  border:1px solid var(--line);
+  border-left-width:4px;
+  border-radius:12px;
+  padding:12px 14px;
+  background:var(--surface-plain);
+  box-shadow:var(--shadow-xs);
+  transition:box-shadow .15s, transform .15s;
+  margin-bottom:10px;
+}
+.md-task:hover{box-shadow:var(--shadow-sm); transform:translateY(-1px)}
+.md-task--overdue{background:var(--overdue-surface); border-color:var(--danger-line); border-left-color:var(--danger-mark)}
+.md-task--soon{background:var(--warn-surface); border-left-color:var(--warn-mark)}
+.md-task-head{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+.md-task-title{font-weight:700; font-size:14px; letter-spacing:-.01em}
+.md-task-desc{font-size:13px; color:var(--text-muted); margin-top:6px; line-height:1.5}
+.md-task-meta{font-size:12px; color:var(--text-muted); margin-top:8px; display:flex; gap:12px; flex-wrap:wrap}
+.md-task-meta strong{color:var(--text); font-weight:600}
+
+.md-badge{
+  font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+  padding:2px 7px; border-radius:var(--radius-pill); color:#fff; line-height:1.6;
+}
+.md-due{font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase}
+.md-due--overdue{color:var(--danger)}
+.md-due--soon{color:var(--warn)}
+
+.md-btn-row{margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center}
+.md-btn{
+  padding:7px 12px; border-radius:var(--radius-pill);
+  border:1px solid var(--line-strong); background:var(--surface-plain); color:var(--text);
+  font-size:12px; font-weight:600; cursor:pointer; min-height:32px;
+  transition:all .15s;
+}
+.md-btn:hover{border-color:var(--action); background:var(--action); color:var(--action-text)}
+.md-btn--danger{color:var(--danger); border-color:var(--danger-line); background:var(--surface-plain)}
+.md-btn--danger:hover{background:var(--danger-mark); border-color:var(--danger-mark); color:#fff}
+.md-btn--primary{background:var(--action); color:var(--action-text); border-color:var(--action)}
+.md-btn--primary:hover{background:var(--action-hover); border-color:var(--action-hover)}
+.md-btn--ghost{border-color:transparent; background:transparent; color:var(--text-muted)}
+.md-btn--ghost:hover{background:var(--surface-2); color:var(--text); border-color:var(--line)}
+
+/* ---------------------------------------------------------------------------
+   Carimbo de origem — itens espelhados do Mastersys
+   ---------------------------------------------------------------------------
+   Um item vindo do Mastersys não pertence ao usuário: ele não pode editar
+   título nem prazo, porque a próxima sincronização sobrescreve. O carimbo
+   (cliente + nº do chamado, em versalete sobre um fio de acento) marca isso
+   antes de o usuário tentar. A borda esquerda dupla reforça de longe.
+--------------------------------------------------------------------------- */
+.md-task--external{
+  border-left-style:double;
+  border-left-width:5px;
+}
+.md-stamp{
+  display:inline-flex; align-items:center; gap:8px;
+  margin-bottom:6px;
+  font-size:10px; font-weight:700;
+  letter-spacing:.1em; text-transform:uppercase;
+  color:var(--text-muted);
+}
+.md-stamp-origin{
+  padding-bottom:2px;
+  border-bottom:2px solid var(--accent);
+  color:var(--text);
+}
+.md-stamp-client{
+  letter-spacing:.04em; text-transform:none; font-weight:600;
+  font-size:11px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:22ch;
+}
+.md-stamp-ticket{
+  font-family:var(--font-mono); letter-spacing:0;
+  padding:1px 6px; border-radius:var(--radius-pill);
+  background:var(--surface-2); border:1px solid var(--line);
+  color:var(--text);
+}
+.md-stamp-status{
+  letter-spacing:.04em; text-transform:none; font-size:11px;
+  color:var(--text-faint);
+}
+
+/* ---------------------------------------------------------------------------
+   Anotações da tarefa — log de atendimento
+   ---------------------------------------------------------------------------
+   As anotações SÃO uma sequência (o que foi feito, em ordem), então a régua
+   vertical com marcador por entrada e o horário monoespaçado na calha à
+   esquerda codificam informação real, não decoram. É a mesma leitura de um
+   caderno de atendimento: hora na margem, texto no corpo.
+--------------------------------------------------------------------------- */
+.md-notes-count{
+  font-family:var(--font-mono);
+  font-size:11px; font-weight:700;
+  padding:1px 6px; border-radius:var(--radius-pill);
+  background:var(--accent); color:var(--accent-ink);
+  line-height:1.6;
+}
+.md-notes-count--empty{background:var(--surface-2); color:var(--text-muted); border:1px solid var(--line)}
+
+.md-tasklog{
+  margin-top:12px;
+  padding-top:12px;
+  border-top:1px dashed var(--line-strong);
+}
+.md-tasklog-list{
+  list-style:none; margin:0; padding:0;
+  position:relative;
+}
+/* Geometria da calha, uma vez só:
+     [ horário 76px ][ 8 ][ marcador 15px ][ 8 ][ texto 1fr ]
+   O horário tem 11 caracteres fixos (`formatEntryTime`), que em 11px
+   monoespaçado dão ~73px — 76px cobre com folga sem abrir buraco.
+   A régua fica no centro da coluna do marcador: 76 + 8 + 7 = 91px. */
+.md-tasklog-list::before{
+  content:"";
+  position:absolute;
+  left:91px; top:6px; bottom:6px;
+  width:1px;
+  background:var(--line-strong);
+}
+.md-tasklog-entry{
+  display:grid;
+  grid-template-columns:76px 15px 1fr;
+  align-items:start;
+  gap:0 8px;
+  padding:5px 0;
+}
+.md-tasklog-time{
+  font-family:var(--font-mono);
+  font-variant-numeric:tabular-nums;
+  font-size:11px; line-height:1.7;
+  color:var(--text-faint);
+  text-align:right;
+  white-space:nowrap;
+}
+.md-tasklog-mark{
+  position:relative; z-index:1;
+  display:grid; place-items:center;
+  width:15px; height:19px;
+}
+.md-tasklog-mark input{
+  appearance:none; -webkit-appearance:none; margin:0;
+  width:11px; height:11px; border-radius:50%;
+  border:1.5px solid var(--line-strong);
+  background:var(--surface-plain);
+  cursor:pointer;
+  transition:background .15s, border-color .15s;
+}
+.md-tasklog-mark input:hover{border-color:var(--text-muted)}
+.md-tasklog-mark input:checked{
+  background:var(--accent); border-color:var(--accent);
+  box-shadow:0 0 0 2px var(--accent-veil);
+}
+.md-tasklog-body{min-width:0}
+.md-tasklog-text{
+  font-size:13px; line-height:1.55;
+  white-space:pre-wrap; word-break:break-word;
+  color:var(--text);
+  cursor:text;
+}
+.md-tasklog-entry--done .md-tasklog-text{
+  color:var(--text-faint);
+  text-decoration:line-through;
+  text-decoration-color:var(--line-strong);
+}
+.md-tasklog-actions{
+  display:flex; gap:4px; margin-top:2px;
+  opacity:0;
+  transition:opacity .12s;
+}
+.md-tasklog-entry:hover .md-tasklog-actions,
+.md-tasklog-entry:focus-within .md-tasklog-actions{opacity:1}
+.md-tasklog-mini{
+  border:none; background:transparent; cursor:pointer;
+  font-size:11px; font-weight:600; padding:2px 6px;
+  border-radius:var(--radius-pill);
+  color:var(--text-muted);
+}
+.md-tasklog-mini:hover{background:var(--surface-2); color:var(--text)}
+.md-tasklog-mini--danger:hover{background:var(--danger-mark); color:#fff}
+
+.md-tasklog-compose{
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:8px;
+  margin-top:8px;
+  padding-left:107px; /* 76 + 8 + 15 + 8 — alinha com a coluna de texto */
+}
+.md-tasklog-compose .md-textarea{min-height:38px; font-size:13px}
+/* Em card estreito o horário quebra em duas linhas (data / hora) e a calha
+   encolhe; a régua acompanha. */
+@media (max-width:640px){
+  .md-tasklog-entry{grid-template-columns:38px 15px 1fr}
+  .md-tasklog-time{white-space:normal; line-height:1.35}
+  .md-tasklog-list::before{left:53px}
+  .md-tasklog-compose{padding-left:0}
+}
+
+/* ---------------------------------------------------------------------------
+   Painel lateral — configuração da integração
+--------------------------------------------------------------------------- */
+@keyframes md-panel-in{from{transform:translateX(16px); opacity:0} to{transform:none; opacity:1}}
+.md-panel-overlay{
+  position:fixed; inset:0; z-index:60;
+  background:rgba(8,9,10,.42);
+  backdrop-filter:blur(2px);
+  display:flex; justify-content:flex-end;
+}
+.md-panel{
+  width:min(420px, 100%);
+  height:100%;
+  background:var(--surface);
+  border-left:1px solid var(--line);
+  box-shadow:var(--shadow-lg);
+  display:flex; flex-direction:column;
+  animation:md-panel-in .18s ease-out;
+}
+.md-panel-head{
+  display:flex; align-items:center; gap:10px;
+  padding:14px; border-bottom:1px solid var(--line);
+}
+.md-panel-head h2{margin:0; font-size:15px; letter-spacing:-.02em; font-weight:750}
+.md-panel-close{
+  margin-left:auto;
+  width:30px; height:30px; border-radius:var(--radius-pill);
+  border:1px solid var(--line-strong); background:var(--surface-plain);
+  cursor:pointer; color:var(--text-muted); line-height:1;
+}
+.md-panel-close:hover{border-color:var(--text); color:var(--text)}
+.md-panel-body{
+  /* `overflow` vem de `.scroll-hidden` no JSX — o app esconde toda barra de
+     rolagem por requisito de design, e o painel não é exceção. */
+  flex:1; min-height:0;
+  padding:14px; display:flex; flex-direction:column; gap:16px;
+}
+.md-panel:focus{outline:none} /* o foco programático não deve desenhar anel */
+.md-panel-note{margin:0; font-size:12px; color:var(--text-muted); line-height:1.55}
+.md-panel-note code{
+  font-family:var(--font-mono); font-size:11px;
+  background:var(--surface-2); padding:1px 5px; border-radius:5px;
+  border:1px solid var(--line);
+}
+.md-panel-section{display:flex; flex-direction:column; gap:8px}
+.md-panel-foot{
+  display:flex; gap:8px; justify-content:flex-end;
+  padding:14px; border-top:1px solid var(--line);
+}
+
+/* Estado da conexão */
+.md-conn{
+  display:flex; align-items:center; gap:10px;
+  padding:10px 12px; border-radius:12px;
+  border:1px solid var(--line);
+  background:var(--surface-plain);
+}
+.md-conn-dot{
+  width:8px; height:8px; border-radius:50%; flex:none;
+  background:var(--text-faint);
+}
+.md-conn--on .md-conn-dot{background:var(--ok)}
+.md-conn--on .md-conn-dot{box-shadow:0 0 0 4px color-mix(in srgb, var(--ok) 22%, transparent)}
+.md-conn--off .md-conn-dot{background:var(--text-faint)}
+.md-conn-text{display:flex; flex-direction:column; gap:1px; min-width:0}
+.md-conn-title{font-size:13px; font-weight:700; letter-spacing:-.01em}
+.md-conn-sub{
+  font-size:12px; color:var(--text-muted);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+
+/* Resumo pós-sincronização */
+.md-sync-report{
+  display:flex; flex-wrap:wrap; gap:6px;
+  list-style:none; margin:0; padding:0;
+}
+.md-sync-report li{
+  font-size:12px; font-weight:600;
+  padding:3px 9px; border-radius:var(--radius-pill);
+  background:var(--surface-2); border:1px solid var(--line);
+  color:var(--text-muted);
+}
+.md-sync-report li strong{
+  font-family:var(--font-mono); color:var(--text); margin-right:3px;
+}
+
+/* ---------------------------------------------------------------------------
+   NoteCard (sticky note)
+   Cores por nota vêm inline do TS (`noteSurface`), que mapeia a cor escolhida
+   para uma variante profunda no tema escuro. O CSS aqui só cuida de forma,
+   profundidade e layout.
+--------------------------------------------------------------------------- */
+.md-note{
+  position:absolute; display:flex; flex-direction:column; overflow:hidden;
+  min-width:180px; min-height:140px;
+  border-radius:16px;
+  box-shadow:var(--shadow-md);
+  border:1px solid transparent;
+  transition:box-shadow .15s, transform .15s;
+  resize:both;
+  backdrop-filter:saturate(1.05);
+}
+.md-note--pinned{box-shadow:var(--shadow-lg)}
+.md-note:hover{box-shadow:var(--shadow-lg)}
+.md-note-head{
+  cursor:grab; user-select:none;
+  padding:8px 10px; display:flex; align-items:center; gap:8px;
+  font-weight:700; font-size:13px; letter-spacing:-.01em;
+  border-bottom:1px solid transparent;
+}
+.md-note-head:active{cursor:grabbing}
+.md-grip{opacity:.35; letter-spacing:-1px; font-size:11px}
+.md-note-title{flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.md-note-body{
+  padding:10px; flex:1; display:flex; flex-direction:column; gap:10px;
+  overflow:auto; scrollbar-width:none;
+}
+.md-note-body::-webkit-scrollbar{display:none}
+.md-note-content{
+  white-space:pre-wrap; font-size:13px; line-height:1.5; flex:1; word-break:break-word;
+}
+.md-note-empty{opacity:.6; font-style:italic}
+.md-icon-btn{
+  font-size:11px; font-weight:600; padding:5px 8px; border-radius:var(--radius-pill);
+  border:1px solid currentColor; background:transparent;
+  cursor:pointer; min-height:28px; transition:opacity .12s, background .12s;
+  opacity:.75;
+}
+.md-icon-btn:hover{opacity:1}
+.md-input-sm{
+  width:100%; padding:8px 10px; border-radius:10px;
+  border:1px solid var(--line-strong); background:var(--surface-plain);
+  font-size:13px; color:var(--text);
+}
+.md-input-sm:focus{outline:none; border-color:var(--text); box-shadow:0 0 0 3px var(--accent-veil)}
+
+.md-swatches{display:flex; flex-wrap:wrap; gap:5px; align-items:center}
+.md-swatch{
+  width:20px; height:20px; border-radius:50%;
+  cursor:pointer; display:grid; place-items:center;
+  position:relative;
+  border:1px solid currentColor;
+  opacity:.55;
+  transition:opacity .12s, transform .12s;
+}
+.md-swatch:hover{opacity:.9; transform:scale(1.08)}
+.md-swatch[aria-pressed="true"]{opacity:1; border-width:2.5px; transform:none}
+
+/* ---------------------------------------------------------------------------
+   Note-window mode (?note=<id>) — janela dedicada frameless sticky.
+   `transparent(true)` + `decorations(false)` + `shadow(false)` + visible(false)
+   + show() evita flash branco. Moldura escondida (pedido DEV).
+--------------------------------------------------------------------------- */
+html.note-window-body, body.note-window-body{
+  background:transparent !important;
+  overflow:hidden;
+  height:100%;
+}
+.note-window-root{
+  width:100vw; height:100vh; overflow:hidden;
+  display:flex; flex-direction:column;
+}
+.note-window-root .md-note--window{box-shadow:none; transition:none}
+.note-window-root .md-note--window:hover{box-shadow:none}
+.note-window-root .md-note--window .md-note-head{cursor:default}
+.note-window-root .md-note--window .md-note-head:active{cursor:default}
+
+/* Estados de carregamento/erro da janela de nota */
+.note-window-state{
+  width:100vw; height:100vh;
+  background:var(--surface); color:var(--text);
+  padding:16px;
+  display:flex; flex-direction:column; gap:12px;
+}
+.note-window-state--loading{display:grid; place-items:center}
+.note-window-hint{font-size:13px; color:var(--text-muted)}
+.note-window-id{font-size:11px; color:var(--text-muted); margin-top:6px; word-break:break-all}
+
+/* ---------------------------------------------------------------------------
+   Responsivo — mínimo suportado 800x500
+--------------------------------------------------------------------------- */
+@media (max-width:860px){
+  .md-create-bar{padding:10px 12px}
+  .md-board-header{flex-wrap:wrap}
+  .md-search{flex:1 1 100%}
+  .md-brand small{display:none}
+}
+@media (max-width:700px){
+  .md-nav{gap:8px; padding:0 10px}
+  .md-nav-user{display:none}
+}
+
+@media (prefers-reduced-motion:reduce){
+  *, *::before, *::after{animation:none !important; transition:none !important; scroll-behavior:auto !important}
+}
