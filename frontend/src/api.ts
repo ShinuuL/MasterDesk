@@ -9,6 +9,10 @@ import type {
   AuthPayload,
   RegisterPayload,
   LoginPayload,
+  TaskNote,
+  MastersysStatus,
+  SupportIdentity,
+  SyncReport,
 } from "./types";
 
 export async function createNote(payload: CreateNotePayload): Promise<Note> {
@@ -168,4 +172,60 @@ export async function authLogout(): Promise<void> {
 
 export async function authIsAuthenticated(): Promise<boolean> {
   return invoke<boolean>("auth_is_authenticated");
+}
+
+// ---------------------------------------------------------------------------
+// Anotações dentro de tarefas
+// ---------------------------------------------------------------------------
+
+export async function addTaskNote(taskId: string, content: string): Promise<TaskNote> {
+  return invoke<TaskNote>("add_task_note", { taskId, content });
+}
+
+export async function listTaskNotes(taskId: string): Promise<TaskNote[]> {
+  return invoke<TaskNote[]>("list_task_notes", { taskId });
+}
+
+export async function countTaskNotes(taskId: string): Promise<number> {
+  return invoke<number>("count_task_notes", { taskId });
+}
+
+export async function updateTaskNote(id: string, content: string): Promise<TaskNote> {
+  return invoke<TaskNote>("update_task_note", { id, content });
+}
+
+export async function setTaskNoteDone(id: string, done: boolean): Promise<TaskNote> {
+  return invoke<TaskNote>("set_task_note_done", { id, done });
+}
+
+export async function deleteTaskNote(id: string): Promise<void> {
+  return invoke<void>("delete_task_note", { id });
+}
+
+// ---------------------------------------------------------------------------
+// Integração Mastersys (ADR-006) — somente leitura
+// ---------------------------------------------------------------------------
+
+export async function mastersysStatus(): Promise<MastersysStatus> {
+  return invoke<MastersysStatus>("mastersys_status");
+}
+
+export async function mastersysSetEndpoint(endpoint: string): Promise<void> {
+  return invoke<void>("mastersys_set_endpoint", { endpoint });
+}
+
+export async function mastersysConnect(
+  identifier: string,
+  password: string,
+): Promise<SupportIdentity> {
+  return invoke<SupportIdentity>("mastersys_connect", { identifier, password });
+}
+
+export async function mastersysDisconnect(): Promise<SyncReport> {
+  return invoke<SyncReport>("mastersys_disconnect");
+}
+
+/** `defaultReminders` em minutos antes do prazo, aplicado só a novos itens. */
+export async function mastersysSync(defaultReminders: number[]): Promise<SyncReport> {
+  return invoke<SyncReport>("mastersys_sync", { defaultReminders });
 }
