@@ -2,7 +2,15 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Pinta o fundo na cor do tema antes de qualquer CSS carregar. Sem isso
+         o webview mostra branco por um frame ao abrir no tema escuro. -->
+    <meta name="color-scheme" content="light dark" />
     <title>MasterDesk</title>
+    <style>
+      html { background: #FDFCF8 }
+      @media (prefers-color-scheme: dark) { html { background: #101113 } }
+    </style>
   </head>
   <body>
     <div id="root"></div>

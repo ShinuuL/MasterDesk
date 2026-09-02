@@ -1,5 +1,7 @@
 import { useState, useRef } from "react";
 import type { Note } from "../types";
+import { noteSurface, noteSwatch, parseHex } from "../theme/noteSurface";
+import { useTheme } from "../theme/useTheme";
 
 const COLORS = ["#FFEB3B", "#FF9800", "#8BC34A", "#03A9F4", "#E91E63", "#9C27B0", "#FFFFFF", "#263238"] as const;
 const COLOR_LABEL: Record<string,string> = {
@@ -20,14 +22,8 @@ interface Props {
   noteWindowMode?: boolean;
 }
 
-function textColorFor(bg: string): string {
-  // usa grafite/escuro contrastante; amarelo e branco precisam ink escuro, grafite precisa claro
-  if (bg === "#263238") return "#FFFFFF";
-  if (bg === "#9C27B0" || bg === "#E91E63") return "#FFFFFF";
-  return "#0F1115";
-}
-
 export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onToggleAot, onPopOut, onCloseWindow, noteWindowMode }: Props) {
+  const { theme } = useTheme();
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(note.title);
   const [content, setContent] = useState(note.content);
@@ -78,8 +74,16 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
     onUpdate(note.id, { size: [newW, newH] });
   };
 
-  const ink = textColorFor(note.color);
-  const isDark = ink === "#FFFFFF";
+  // A cor da nota é do usuário, então não pode virar token de CSS: o tema
+  // escuro a remapeia para uma variante profunda da mesma família, e o texto
+  // sai do contraste calculado (WCAG), não de uma lista de cores conhecidas.
+  const surface = noteSurface(note.color, theme === "dark");
+  const ink = surface.text;
+  const headBtnStyle: React.CSSProperties = {
+    color: ink,
+    borderColor: surface.hairline,
+    background: surface.chip,
+  };
 
   return (
     <div
@@ -93,7 +97,7 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
         height: "100%",
         borderRadius: 0,
         border: "none",
-        background: note.color,
+        background: surface.background,
         opacity: note.opacity,
         color: ink,
         resize: "none",
@@ -102,7 +106,8 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
         top: note.position[1],
         width: note.size[0],
         height: note.size[1],
-        background: note.color,
+        background: surface.background,
+        borderColor: surface.border,
         opacity: note.opacity,
         color: ink,
       }}
@@ -122,16 +127,20 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
           ? ({ "data-tauri-drag-region": "deep" } as React.HTMLAttributes<HTMLDivElement>)
           : {})}
         className="md-note-head"
-        style={{ color: ink, borderColor: isDark ? "rgba(255,255,255,.14)" : "rgba(15,17,21,.08)" }}
+        style={{
+          color: ink,
+          background: surface.headBackground,
+          borderBottomColor: surface.hairline,
+        }}
       >
         <span className="md-grip" aria-hidden>⋮⋮</span>
         <span className="md-note-title" title={note.title}>
           {note.title} {note.pinned ? "📌" : ""} {note.always_on_top ? "⬆" : ""}
         </span>
-        <button onClick={() => onTogglePin(note.id)} title={note.pinned ? "Desafixar" : "Fixar"} aria-pressed={note.pinned} className="md-icon-btn" style={{ color: ink, borderColor: isDark ? "rgba(255,255,255,.22)" : undefined, background: isDark ? "rgba(255,255,255,.12)" : undefined }}>
+        <button onClick={() => onTogglePin(note.id)} title={note.pinned ? "Desafixar" : "Fixar"} aria-pressed={note.pinned} className="md-icon-btn" style={headBtnStyle}>
           {note.pinned ? "Unpin" : "Pin"}
         </button>
-        <button onClick={() => onToggleAot(note.id)} title="Always on top" aria-pressed={note.always_on_top} className="md-icon-btn" style={{ color: ink, borderColor: isDark ? "rgba(255,255,255,.22)" : undefined, background: isDark ? "rgba(255,255,255,.12)" : undefined }}>
+        <button onClick={() => onToggleAot(note.id)} title="Always on top" aria-pressed={note.always_on_top} className="md-icon-btn" style={headBtnStyle}>
           {note.always_on_top ? "AOT off" : "AOT on"}
         </button>
         {noteWindowMode ? (
@@ -139,7 +148,7 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
             onClick={() => onCloseWindow?.(note.id)}
             title="Fechar janela"
             className="md-icon-btn"
-            style={{ color: ink, borderColor: isDark ? "rgba(255,255,255,.22)" : undefined, background: isDark ? "rgba(255,255,255,.12)" : undefined }}
+            style={headBtnStyle}
           >
             ✕
           </button>
@@ -148,7 +157,7 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
             onClick={() => onPopOut?.(note.id)}
             title="Destacar em janela separada"
             className="md-icon-btn"
-            style={{ color: ink, borderColor: isDark ? "rgba(255,255,255,.22)" : undefined, background: isDark ? "rgba(255,255,255,.12)" : undefined }}
+            style={headBtnStyle}
           >
             Pop-out
           </button>
@@ -175,7 +184,7 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
               style={{ resize:"vertical", minHeight:72 }}
             />
             <div style={{ display:"flex", gap:6 }}>
-              <button onClick={save} className="md-icon-btn" style={{ background: ink, color: note.color, borderColor: ink, fontWeight:700 }}>
+              <button onClick={save} className="md-icon-btn" style={{ background: ink, color: surface.background, borderColor: ink, fontWeight:700, opacity:1 }}>
                 Salvar
               </button>
               <button
@@ -192,8 +201,8 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
           </>
         ) : (
           <>
-            <div style={{ whiteSpace:"pre-wrap", fontSize:13, lineHeight:1.5, flex:1, wordBreak:"break-word" }}>
-              {note.content || <i style={{ opacity:.6 }}>sem conteúdo</i>}
+            <div className="md-note-content">
+              {note.content || <i className="md-note-empty">sem conteúdo</i>}
             </div>
             <button onClick={() => setEditing(true)} className="md-icon-btn" style={{ alignSelf:"flex-start" }}>
               Editar
@@ -201,7 +210,7 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
           </>
         )}
 
-        <div style={{ display:"flex", flexWrap:"wrap", gap:5, alignItems:"center" }} role="group" aria-label="Escolher cor">
+        <div className="md-swatches" role="group" aria-label="Escolher cor">
           {COLORS.map((c) => {
             const selected = c === note.color;
             return (
@@ -211,37 +220,31 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
                 title={COLOR_LABEL[c] ?? c}
                 aria-label={`Cor ${COLOR_LABEL[c] ?? c}`}
                 aria-pressed={selected}
-                style={{
-                  width:20, height:20, borderRadius:"50%",
-                  background:c,
-                  border: selected ? "2.5px solid #0F1115" : "1px solid rgba(15,17,21,.18)",
-                  cursor:"pointer",
-                  boxShadow: selected ? "0 0 0 2px rgba(15,17,21,.08)" : "0 1px 2px rgba(0,0,0,.08)",
-                  position:"relative",
-                  display:"grid", placeItems:"center",
-                }}
+                className="md-swatch"
+                // A amostra mostra a cor como ela vai ficar NESTE tema.
+                style={{ background: noteSwatch(c), color: ink }}
               >
-                {selected && <span aria-hidden style={{ fontSize:10, lineHeight:1, color: c==="#263238"||c==="#9C27B0" ? "#fff" : "#0F1115", fontWeight:800 }}>✓</span>}
+                {selected && (
+                  <span aria-hidden style={{ fontSize:10, lineHeight:1, fontWeight:800, color: noteSurface(c, theme === "dark").text }}>✓</span>
+                )}
               </button>
             );
           })}
           <label
             title="Cor personalizada"
             aria-label="Cor personalizada"
+            aria-pressed={!COLORS.includes(note.color as typeof COLORS[number])}
+            className="md-swatch"
             style={{
-              width:20, height:20, borderRadius:"50%",
               background:"conic-gradient(from 0deg, #f44336, #ffeb3b, #8bc34a, #03a9f4, #9c27b0, #f44336)",
-              border: !COLORS.includes(note.color as typeof COLORS[number]) ? "2.5px solid #0F1115" : "1px solid rgba(15,17,21,.18)",
-              cursor:"pointer",
-              boxShadow: !COLORS.includes(note.color as typeof COLORS[number]) ? "0 0 0 2px rgba(15,17,21,.08)" : "0 1px 2px rgba(0,0,0,.08)",
-              display:"grid", placeItems:"center",
-              position:"relative", overflow:"hidden",
+              color: ink,
+              overflow:"hidden",
             }}
           >
-            <span aria-hidden style={{ fontSize:10, lineHeight:1, fontWeight:800, background:"white", borderRadius:"50%", width:10, height:10, display:"grid", placeItems:"center", border:"1px solid rgba(15,17,21,.12)" }}>+</span>
+            <span aria-hidden style={{ fontSize:10, lineHeight:1, fontWeight:800, background:"#fff", color:"#0F1115", borderRadius:"50%", width:10, height:10, display:"grid", placeItems:"center" }}>+</span>
             <input
               type="color"
-              value={/^#[0-9a-fA-F]{6}$/.test(note.color) ? note.color : "#FFEB3B"}
+              value={parseHex(note.color) ? note.color : "#FFEB3B"}
               onInput={(e) => onUpdate(note.id, { color: (e.target as HTMLInputElement).value })}
               style={{ position:"absolute", inset:0, opacity:0, cursor:"pointer", width:"100%", height:"100%" }}
             />
@@ -255,8 +258,8 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
         </label>
 
         <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-          <button onClick={() => onArchive(note.id)} className="md-icon-btn">Arquivar</button>
-          <button onClick={() => onDelete(note.id)} className="md-icon-btn" style={{ color:"#B91C1C", borderColor:"rgba(185,28,28,.22)" }}>
+          <button onClick={() => onArchive(note.id)} className="md-icon-btn" style={headBtnStyle}>Arquivar</button>
+          <button onClick={() => onDelete(note.id)} className="md-icon-btn" style={{ ...headBtnStyle, color: surface.onDark ? "#FCA5A5" : "#B91C1C" }}>
             Deletar
           </button>
         </div>
@@ -264,7 +267,7 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
         {note.tags.length > 0 && (
           <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
             {note.tags.map((t) => (
-              <span key={t} style={{ fontSize:11, background: isDark ? "rgba(255,255,255,.14)" : "rgba(15,17,21,.08)", color: ink, padding:"2px 7px", borderRadius:999, fontWeight:500 }}>
+              <span key={t} style={{ fontSize:11, background: surface.chip, color: ink, padding:"2px 7px", borderRadius:999, fontWeight:500 }}>
                 #{t}
               </span>
             ))}

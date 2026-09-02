@@ -343,16 +343,16 @@ function EmptyState({ showArchived, hasFilter, onClearFilter, onFocusCreate }: {
       <div className="md-empty-illus" aria-hidden>
         {/* sticky note icon */}
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden style={{ position:"relative", zIndex:1 }}>
-          <rect x="4" y="4" width="14" height="14" rx="2.5" fill="white" stroke="#0F1115" strokeWidth="1.4"/>
-          <rect x="7.2" y="7.2" width="14" height="14" rx="2.5" fill="#FFEB3B" stroke="#0F1115" strokeWidth="1.4"/>
-          <path d="M11 11h6M11 14.5h6" stroke="#0F1115" strokeWidth="1.2" strokeLinecap="round"/>
+          <rect x="4" y="4" width="14" height="14" rx="2.5" fill="var(--surface-plain)" stroke="var(--text)" strokeWidth="1.4"/>
+          <rect x="7.2" y="7.2" width="14" height="14" rx="2.5" fill="var(--accent)" stroke="var(--text)" strokeWidth="1.4"/>
+          <path d="M11 11h6M11 14.5h6" stroke="var(--accent-ink)" strokeWidth="1.2" strokeLinecap="round"/>
         </svg>
       </div>
       <h3>Sua mesa está limpa</h3>
       <p>Crie a primeira nota acima. Arraste para organizar, troque a cor e ajuste a opacidade — tudo fica sobre uma mesa pontilhada.</p>
       <div style={{ display:"flex", gap:8, flexWrap:"wrap", justifyContent:"center" }}>
         <button className="md-empty-cta md-empty-cta--primary" onClick={onFocusCreate}>Criar primeira nota</button>
-        <span style={{ fontSize:12, color:"var(--muted)", alignSelf:"center" }}>dica: Enter cria rápido</span>
+        <span style={{ fontSize:12, color:"var(--text-muted)", alignSelf:"center" }}>dica: Enter cria rápido</span>
       </div>
     </div>
   );

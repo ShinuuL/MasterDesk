@@ -3,6 +3,7 @@ import { NotesBoard } from "./components/NotesBoard";
 import { TasksBoard } from "./components/TasksBoard";
 import { AuthPanel } from "./components/AuthPanel";
 import { NoteCard } from "./components/NoteCard";
+import { ThemeToggle } from "./components/ThemeToggle";
 import type { AuthPayload, Note } from "./types";
 import * as api from "./api";
 
@@ -231,26 +232,30 @@ function NoteWindowApp({ noteId }: { noteId: string }) {
 
   if (loading) {
     return (
-      <div className="note-window-root" style={{ display: "grid", placeItems: "center", background: "#fff", padding: 16 }}>
-        <div style={{ fontSize: 13, color: "#6B7280" }}>Carregando nota {noteId.slice(0, 8)}...</div>
-        <div className="md-skeleton" style={{ width: 260, marginTop: 12 }} />
+      <div className="note-window-state note-window-state--loading">
+        <div>
+          <div className="note-window-hint">Carregando nota {noteId.slice(0, 8)}…</div>
+          <div className="md-skeleton" style={{ width: 260, marginTop: 12, marginLeft: 0, marginRight: 0 }} />
+        </div>
       </div>
     );
   }
 
   if (!note || error) {
     return (
-      <div className="note-window-root" role="alert" style={{ background: "#fff", padding: 16 }}>
-        <div style={{ padding: "14px", fontSize: 13, background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10 }}>
-          <strong style={{ fontWeight: 700 }}>Não foi possível carregar a nota:</strong> {error ?? "nota não encontrada"}
-          <div style={{ fontSize: 11, color: "#6B7280", marginTop: 6, wordBreak: "break-all" }}>ID: {noteId}</div>
+      <div className="note-window-state" role="alert">
+        <div className="md-alert" style={{ margin: 0 }}>
+          <strong style={{ fontWeight: 700 }}>Não foi possível carregar a nota.</strong>{" "}
+          {error ?? "A nota não foi encontrada — ela pode ter sido deletada."}
+          <div className="note-window-id">ID: {noteId}</div>
         </div>
         <button
+          className="md-btn"
+          style={{ alignSelf: "flex-start" }}
           onClick={async () => {
             try { await api.closeNoteWindow(noteId); } catch {}
             try { const w = (await import("@tauri-apps/api/window")).getCurrentWindow(); await w.close(); } catch { window.close(); }
           }}
-          style={{ marginTop: 12, padding: "6px 12px", borderRadius: 999, border: "1px solid #E8E6E1", background: "#fff" }}
         >
           Fechar janela
         </button>
@@ -328,7 +333,7 @@ function MainApp() {
 
   if (authLoading) {
     return (
-      <div style={{ height: "100vh", display: "grid", placeItems: "center", background: "var(--canvas-dot)" }}>
+      <div style={{ height: "100vh", display: "grid", placeItems: "center", background: "var(--canvas)" }}>
         <div className="md-skeleton" style={{ width: 320 }} />
       </div>
     );
@@ -339,7 +344,7 @@ function MainApp() {
   }
 
   return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background:"var(--paper)" }}>
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background:"var(--surface)" }}>
       <nav className="md-nav" role="tablist" aria-label="Seções do MasterDesk">
         <div className="md-brand" aria-label="MasterDesk">
           <div className="md-brand-mark" aria-hidden>MD</div>
@@ -373,11 +378,12 @@ function MainApp() {
         </div>
 
         <div className="md-nav-right">
-          <span style={{ display:"flex", alignItems:"center", gap:6 }}>
-            <span style={{ width:7, height:7, borderRadius:"50%", background:"var(--accent)", display:"inline-block", boxShadow:"0 0 0 4px rgba(255,235,59,.18)" }} />
+          <ThemeToggle />
+          <span className="md-nav-sep" aria-hidden>•</span>
+          <span className="md-nav-user">
+            <span className="md-nav-dot" aria-hidden />
             @{authUser.username}
           </span>
-          <span style={{ opacity:.45 }}>•</span>
           <button
             onClick={handleLogout}
             className="md-tab"

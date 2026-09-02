@@ -58,10 +58,10 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
   };
 
   return (
-    <div style={{ height: "100vh", display: "grid", placeItems: "center", background: "var(--canvas-dot)" }}>
-      <div style={{ width: 360, background: "#fff", border: "1px solid var(--line-strong)", borderRadius: "var(--radius-lg)", boxShadow: "var(--shadow-lg)", overflow: "hidden" }}>
-        <div style={{ padding: "22px 24px", display: "flex", alignItems: "center", gap: 12, borderBottom: "1px solid var(--line)", background: "var(--ink)", color: "#fff" }}>
-          <div style={{ width: 40, height: 40, borderRadius: 10, background: "var(--accent)", color: "var(--ink)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 16 }} aria-hidden>
+    <div style={{ height: "100vh", display: "grid", placeItems: "center", background: "var(--canvas)" }}>
+      <div style={{ width: 360, background: "var(--surface-plain)", border: "1px solid var(--line-strong)", borderRadius: "var(--radius-lg)", boxShadow: "var(--shadow-lg)", overflow: "hidden" }}>
+        <div style={{ padding: "22px 24px", display: "flex", alignItems: "center", gap: 12, borderBottom: "1px solid var(--line)", background: "var(--chrome)", color: "var(--chrome-text)" }}>
+          <div style={{ width: 40, height: 40, borderRadius: 10, background: "var(--accent)", color: "var(--text)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 16 }} aria-hidden>
             MD
           </div>
           <div>
@@ -74,7 +74,7 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
           <h1 style={{ margin: "0 0 4px", fontSize: 18, letterSpacing: "-.02em", fontWeight: 750 }}>
             {mode === "login" ? "Entrar" : "Criar conta"}
           </h1>
-          <p style={{ margin: "0 0 18px", fontSize: 13, color: "var(--muted)" }}>
+          <p style={{ margin: "0 0 18px", fontSize: 13, color: "var(--text-muted)" }}>
             {mode === "login"
               ? "Acesse sua mesa de trabalho local."
               : "Sua conta fica apenas neste dispositivo — sem nuvem."}
@@ -82,7 +82,7 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
 
           <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div className="md-field">
-              <label htmlFor="auth-username" style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--muted)" }}>
+              <label htmlFor="auth-username" style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--text-muted)" }}>
                 Usuário
               </label>
               <input
@@ -98,7 +98,7 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
             </div>
 
             <div className="md-field">
-              <label htmlFor="auth-password" style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--muted)" }}>
+              <label htmlFor="auth-password" style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--text-muted)" }}>
                 Senha
               </label>
               <input
@@ -114,7 +114,7 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
 
             {mode === "register" && (
               <div className="md-field">
-                <label htmlFor="auth-password2" style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--muted)" }}>
+                <label htmlFor="auth-password2" style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--text-muted)" }}>
                   Confirmar senha
                 </label>
                 <input
@@ -140,14 +140,14 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
             </button>
           </form>
 
-          <div style={{ marginTop: 18, fontSize: 13, color: "var(--muted)", textAlign: "center" }}>
+          <div style={{ marginTop: 18, fontSize: 13, color: "var(--text-muted)", textAlign: "center" }}>
             {mode === "login" ? (
               <>
                 Ainda não tem conta?{" "}
                 <button
                   type="button"
                   onClick={() => switchMode("register")}
-                  style={{ background: "none", border: "none", padding: 0, color: "var(--ink)", fontWeight: 700, textDecoration: "underline", cursor: "pointer" }}
+                  style={{ background: "none", border: "none", padding: 0, color: "var(--text)", fontWeight: 700, textDecoration: "underline", cursor: "pointer" }}
                 >
                   Criar conta
                 </button>
@@ -158,7 +158,7 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
                 <button
                   type="button"
                   onClick={() => switchMode("login")}
-                  style={{ background: "none", border: "none", padding: 0, color: "var(--ink)", fontWeight: 700, textDecoration: "underline", cursor: "pointer" }}
+                  style={{ background: "none", border: "none", padding: 0, color: "var(--text)", fontWeight: 700, textDecoration: "underline", cursor: "pointer" }}
                 >
                   Entrar
                 </button>
