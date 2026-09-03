@@ -97,6 +97,42 @@ precisa trazer o endereço em destaque.
 pasta acima do repositório) já tem o endereço e um checklist de diagnóstico;
 falta apenas ele chegar a quem for instalar.
 
+## 📦 Distribuição para a equipe — o que avisar
+
+### Desinstalar o "MasterDesk" antes de instalar o "MasterNote"
+
+O `identifier` continua `com.masterdesk.app` (para não orfanar o banco), mas o
+`productName` virou `MasterNote`. No Tauri 2 o diretório de instalação e a chave
+de desinstalação derivam do **productName**, e não há `upgradeCode` fixado no
+`tauri.conf.json`. Resultado para quem já tem a versão anterior:
+
+- o instalador novo cria um aplicativo **separado**, não uma atualização;
+- "MasterDesk" continua listado em Aplicativos e Recursos;
+- os dois compartilham o **mesmo banco**, porque o identifier é o mesmo;
+- e o executável antigo **ainda funciona**, com os bugs já corrigidos.
+
+O risco prático é um colega abrir o atalho antigo e reportar como bug a janela
+agitando ou o pós-atendimento contando como atrasado — coisas resolvidas.
+
+**Instrução para o guia:** desinstalar "MasterDesk" primeiro. Os dados são
+preservados, porque vivem em `%APPDATA%/com.masterdesk.app/` e não na pasta de
+instalação.
+
+Fixar um `upgradeCode` para o MSI atualizar no lugar foi considerado e
+descartado: resolveria só o MSI (não o NSIS), exigiria descobrir o UUID gerado
+para o nome antigo, e para um 0.1.0 interno desinstalar é mais simples e
+verificável.
+
+### Testes antes do deploy do `ticketStatus`
+
+A alteração no backend do suporte (`TaskDTO.ticketStatus`) está com o outro dev.
+**Enquanto ela não subir**, o comportamento é o compatível: sem o campo, o
+MasterNote usa o status da tarefa e detecta item parado apenas para chamados que
+chegam pelo ramo de *chamados* — não pelos que têm tarefa no quadro.
+
+Então, nesse intervalo, é **esperado** que alguns itens em pós-atendimento ainda
+apareçam como atrasados. Não é bug novo; é a lacuna que aquele deploy fecha.
+
 ## 🔒 Achado de segurança no Mastersys — reportado, não corrigido
 
 `backend/src/shared/infra/socket/SocketService.ts:36-56`: `chat:join` aceita o
