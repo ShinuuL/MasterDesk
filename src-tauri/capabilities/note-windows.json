@@ -1,12 +1,26 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "note-windows",
-  "description": "Permissions para a janela principal e as janelas dedicadas de nota (pop-out). Sem esta capability a API core (core:window/core:event) fica bloqueada no frontend — causava falha silenciosa em getCurrentWindow().close()/onMoved/onResized (P5).",
-  "windows": ["main", "note-*"],
+  "description": "Permissions para a janela principal e as janelas dedicadas de nota e de tarefa (pop-out). ATENÇÃO: `core:window:default` concede APENAS as 28 permissões de LEITURA (getters e monitores) — nenhuma de escrita. Toda operação que mexe na janela precisa ser declarada uma a uma abaixo, senão é negada pela ACL EM SILÊNCIO, sem erro no console. Foi essa a causa de o arrastar da janela de nota não funcionar (`data-tauri-drag-region` chama `startDragging`, que exige `core:window:allow-start-dragging`).",
+  "windows": ["main", "note-*", "task-*"],
   "permissions": [
     "core:default",
     "core:window:default",
     "core:webview:default",
-    "core:event:default"
+    "core:event:default",
+
+    "core:window:allow-start-dragging",
+    "core:window:allow-start-resize-dragging",
+
+    "core:window:allow-close",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-center",
+
+    "core:window:allow-set-position",
+    "core:window:allow-set-size",
+    "core:window:allow-set-always-on-top",
+    "core:window:allow-set-title"
   ]
 }

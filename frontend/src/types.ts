@@ -133,6 +133,52 @@ export interface ExternalRef {
   ticket: string | null;
   /** Status cru da origem, ex. `aguardando_retorno_cliente`. */
   status_label: string | null;
+  /**
+   * A origem considera este item **parado**: em espera, concluído ou cancelado.
+   *
+   * Prazo de item parado não significa urgência — um chamado em pós-atendimento
+   * com prazo vencido está aguardando, não atrasado. Quem preenche é o adapter,
+   * a partir do catálogo de status (`MastersysTicketStatus.is_parked`).
+   */
+  status_parked: boolean;
+}
+
+/**
+ * Um status de chamado como cadastrado no Mastersys.
+ *
+ * Espelhado localmente para o quadro ter o rótulo em pt-BR ("Pós Atendimento",
+ * não "pos atendimento"), a cor definida na origem, e saber quais status vêm
+ * pré-marcados no filtro.
+ */
+export interface MastersysTicketStatus {
+  /** Slug, ex. `pos_atendimento`. Casa com `ExternalRef.status_label`. */
+  value: string;
+  label: string;
+  /** Hex da origem. NÃO usar cru — passar por `noteSurface()` (ADR-009). */
+  color: string;
+  /** Vem pré-marcado no filtro. `false` para finalizado/cancelado/pós-atendimento. */
+  default_filter: boolean;
+  is_final: boolean;
+  pauses_sla: boolean;
+  display_order: number;
+}
+
+/**
+ * Item de trabalho cru vindo da origem, antes de virar espelho local.
+ *
+ * O quadro não usa isto no fluxo normal — os espelhos chegam como `Task`. Este
+ * tipo aparece só no resultado da **busca ao vivo**, que é consulta: nada aqui
+ * está gravado no banco local.
+ */
+export interface ExternalWorkItem {
+  reference: ExternalRef;
+  title: string;
+  description: string;
+  priority: Priority;
+  deadline: string | null;
+  completed: boolean;
+  /** Saiu da fila na origem (cancelado). Sinal de sincronização, não de exibição. */
+  removed: boolean;
 }
 
 export interface SupportIdentity {
@@ -146,6 +192,29 @@ export interface MastersysStatus {
   endpoint: string | null;
   connected: boolean;
   identity: SupportIdentity | null;
+  /**
+   * Janela, em dias, de chamados buscados na sincronização.
+   *
+   * Vale mostrar na tela de integração: um chamado aberto mais antigo que a
+   * janela não aparece no quadro, e sem essa informação a ausência parece bug.
+   */
+  ticket_window_days: number;
+}
+
+/**
+ * Resultado da última sincronização automática.
+ *
+ * Existe porque a falha do sync automático é silenciosa de propósito, e sem
+ * registro "está demorando" e "não está acontecendo" ficam indistinguíveis.
+ */
+export interface LastSync {
+  /** ISO8601 UTC. */
+  at: string;
+  /** `timer`, `tempo real` ou `pedido`. */
+  trigger: string;
+  /** `null` = deu certo. */
+  error: string | null;
+  report: SyncReport | null;
 }
 
 export interface SyncReport {

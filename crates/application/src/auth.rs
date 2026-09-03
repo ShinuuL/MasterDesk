@@ -152,7 +152,7 @@ mod tests {
                     *self.session.lock().unwrap() = Some(user.id);
                     Ok(user.clone())
                 }
-                _ => Err(DomainError::Unauthorized),
+                _ => Err(DomainError::unauthorized("usuário ou senha incorretos")),
             }
         }
 
@@ -214,7 +214,7 @@ mod tests {
                 password: "wrong".into(),
             })
             .await;
-        assert!(matches!(err, Err(DomainError::Unauthorized)));
+        assert!(matches!(err, Err(DomainError::Unauthorized(_))));
     }
 
     #[tokio::test]

@@ -27,6 +27,25 @@ password-hash = { version = "0.5", features = ["getrandom"] }
 # atende CA corporativa em instalação self-hosted e dispensa OpenSSL no build.
 reqwest = { version = "0.13", features = ["json"] }
 
+# rust_socketio: cliente Socket.IO para o canal de tempo real do Mastersys
+# (ADR-010). Pesquisa registrada na seção "Pesquisa da dependência" da ADR.
+#
+# Resumo do que foi verificado antes de adotar:
+# - Protocolo: revisão 5 do socket.io / 4 do engine.io, que é o que o servidor
+#   `socket.io@4.8.3` do Mastersys fala.
+# - Licença MIT.
+# - Path customizado (`/api/socket.io/`) funciona: `connect_raw` só injeta
+#   `/socket.io/` quando o path da URL é `/`, preservando qualquer outro.
+# - RESSALVA ACEITA PELO DEV: a crate está dormente (último release abr/2024,
+#   último commit fev/2025). O risco é contido porque o tempo real é apenas
+#   ACELERAÇÃO — o polling do `sync_scheduler` é o mecanismo garantido, e
+#   remover esta dependência não custaria função, só latência.
+#
+# Sem a feature `async`, que o próprio projeto declara experimental ("the
+# interface can be object to changes at any time"). O cliente síncrono roda em
+# thread própria, que basta para o nosso uso: receber sinal e enfileirar sync.
+rust_socketio = "0.6"
+
 # keyring 3.x: cofre nativo do SO para o refresh token (CLAUDE §11/13).
 # Fixado em 3.x de propósito — a 4.x migrou para `keyring-core` e exige
 # registrar o store explicitamente, com documentação ainda escassa.

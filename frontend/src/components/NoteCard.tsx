@@ -36,6 +36,22 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
     }
   };
 
+  /**
+   * Faz do cabeçalho a alça de arrastar da janela destacada.
+   *
+   * O Tauri só olha a **presença** de `data-tauri-drag-region`; o valor é
+   * ignorado. Antes estava `"deep"`, que não significa nada aqui e sugeria um
+   * comportamento inexistente.
+   *
+   * Arrastar exige ainda `core:window:allow-start-dragging` na capability.
+   * `core:window:default` concede apenas as 28 permissões de leitura, então a
+   * chamada era negada pela ACL **em silêncio** — era essa a razão de a janela
+   * de nota não arrastar, e não o código daqui.
+   */
+  const dragRegionProps = noteWindowMode
+    ? ({ "data-tauri-drag-region": "" } as React.HTMLAttributes<HTMLDivElement>)
+    : {};
+
   const handleMouseDown = (e: React.MouseEvent) => {
     // In note-window mode, don't prevent default — let the OS handle window dragging
     if (noteWindowMode) return;
@@ -123,9 +139,7 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
     >
       <div
         onMouseDown={handleMouseDown}
-        {...(noteWindowMode
-          ? ({ "data-tauri-drag-region": "deep" } as React.HTMLAttributes<HTMLDivElement>)
-          : {})}
+        {...dragRegionProps}
         className="md-note-head"
         style={{
           color: ink,

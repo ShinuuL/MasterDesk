@@ -1,4 +1,4 @@
-/* MasterDesk — design system
+/* MasterNote — design system
    ===========================================================================
    Identidade: "warm desk". No claro, papel morno (#FDFCF8) sobre uma mesa
    levemente mais fria (#F6F5F1), tinta quase-preta e um único acento amarelo
@@ -570,10 +570,114 @@ input[type="checkbox"]{accent-color:var(--accent)}
   background:var(--surface-2); border:1px solid var(--line);
   color:var(--text);
 }
-.md-stamp-status{
-  letter-spacing:.04em; text-transform:none; font-size:11px;
-  color:var(--text-faint);
+/* Selo de status do chamado.
+   Era `--text-faint` no fim da linha e passava despercebido (ver melhoria.png);
+   agora abre o selo com fundo colorido. A cor vem do cadastro do Mastersys via
+   `noteSurface()`, então background/color/border chegam inline — aqui fica só a
+   forma. */
+.md-status-badge{
+  letter-spacing:.04em; text-transform:none; font-size:11px; font-weight:700;
+  padding:2px 8px; border-radius:var(--radius-pill);
+  border:1px solid transparent;
+  white-space:nowrap;
 }
+/* Sem catálogo: mantém a discrição antiga em vez de inventar cor. */
+.md-status-badge--plain{
+  background:var(--surface-2); border-color:var(--line); color:var(--text-muted);
+  font-weight:600;
+}
+/* Item parado não deve competir com trabalho ativo pela atenção. */
+.md-status-badge--parked{ opacity:.72; font-weight:600 }
+
+.md-due--parked{ color:var(--text-muted); font-weight:600 }
+
+/* ---------------------------------------------------------------------------
+   Filtros do quadro de tarefas
+   --------------------------------------------------------------------------- */
+.md-taskfilters{ position:relative; padding:0 0 10px }
+.md-taskfilters-bar{ display:flex; gap:8px; align-items:center; flex-wrap:wrap }
+
+.md-search{ position:relative; flex:1 1 260px; min-width:200px }
+.md-search-input{ width:100%; padding-right:28px }
+.md-search-clear{
+  position:absolute; right:6px; top:50%; transform:translateY(-50%);
+  background:none; border:0; cursor:pointer; padding:2px 4px;
+  color:var(--text-muted); font-size:12px; line-height:1;
+}
+.md-search-clear:hover{ color:var(--text) }
+
+.md-filter-count{
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:16px; height:16px; margin-left:6px; padding:0 4px;
+  border-radius:var(--radius-pill);
+  background:rgba(255,255,255,.22);
+  font-size:10px; font-weight:800;
+}
+
+.md-filter-popover{
+  position:absolute; right:0; top:calc(100% - 4px); z-index:40;
+  width:min(420px, calc(100vw - 32px));
+  max-height:70vh; overflow-y:auto;
+  padding:14px;
+  background:var(--surface); border:1px solid var(--line);
+  border-radius:var(--radius-md); box-shadow:var(--shadow-lg, 0 12px 32px rgba(0,0,0,.22));
+}
+.md-filter-group{ border:0; margin:0 0 12px; padding:0 }
+.md-filter-group legend{
+  padding:0; margin-bottom:6px;
+  font-size:10px; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--text-muted);
+}
+.md-filter-chips{ display:flex; flex-wrap:wrap; gap:6px }
+.md-filter-chip{
+  padding:3px 6px; border-radius:var(--radius-pill);
+  background:var(--surface-2); border:1px solid var(--line);
+  cursor:pointer; font-size:11px; color:var(--text);
+  max-width:24ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.md-filter-chip:hover{ border-color:var(--accent) }
+/* Selecionado precisa ler como selecionado mesmo quando o conteúdo é um selo
+   colorido, que já tem fundo próprio — daí o anel em vez de fundo. */
+.md-filter-chip--on{
+  border-color:var(--accent);
+  box-shadow:0 0 0 2px var(--accent);
+}
+/* ADR-009 registra que `color-mix` é usado com fallback opaco declarado antes;
+   mesmo padrão aqui — o anel sólido acima vale onde não houver suporte. */
+@supports (color: color-mix(in srgb, red 50%, blue)){
+  .md-filter-chip--on{
+    box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+}
+
+.md-filter-row{ display:flex; gap:10px; margin-bottom:10px; flex-wrap:wrap }
+.md-filter-field{ display:flex; flex-direction:column; gap:4px; flex:1 1 150px }
+.md-filter-field > span{
+  font-size:10px; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--text-muted);
+}
+.md-filter-hint{ margin:6px 0 0; font-size:11px; color:var(--text-muted); line-height:1.45 }
+.md-filter-foot{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  padding-top:10px; border-top:1px solid var(--line);
+}
+
+/* ---------------------------------------------------------------------------
+   Resultado da busca ao vivo no Mastersys — consulta, não espelho
+   --------------------------------------------------------------------------- */
+.md-remote-results{
+  margin:0 0 12px; padding:12px;
+  background:var(--surface-2); border:1px dashed var(--line);
+  border-radius:var(--radius-md);
+}
+.md-remote-list{ list-style:none; margin:8px 0 0; padding:0; display:grid; gap:8px }
+.md-remote-item{
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  padding:8px 10px;
+  background:var(--surface); border:1px solid var(--line);
+  border-radius:var(--radius-sm);
+}
+.md-remote-title{ flex:1 1 220px; font-size:13px; font-weight:600 }
 
 /* ---------------------------------------------------------------------------
    Anotações da tarefa — log de atendimento
@@ -858,6 +962,64 @@ html.note-window-body, body.note-window-body{
 .note-window-root .md-note--window .md-note-head{cursor:default}
 .note-window-root .md-note--window .md-note-head:active{cursor:default}
 
+/* ---------------------------------------------------------------------------
+   Pop-out de TAREFA
+   Reaproveita `note-window-body` / `note-window-root` (janela transparente e
+   sem moldura), mas o conteúdo é outro: cabeçalho de arrastar + log.
+   --------------------------------------------------------------------------- */
+.md-taskwindow{
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-radius:var(--radius-md);
+  overflow:hidden;
+}
+.md-taskwindow-head{
+  display:flex; align-items:center; gap:8px;
+  padding:8px 10px;
+  background:var(--surface-2);
+  border-bottom:1px solid var(--line);
+  /* A alça de arrastar é o cabeçalho inteiro; o cursor precisa dizer isso. */
+  cursor:grab;
+  user-select:none;
+}
+.md-taskwindow-head:active{ cursor:grabbing }
+.md-taskwindow-title{
+  flex:1; min-width:0;
+  font-size:12px; font-weight:700;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.md-taskwindow-close{
+  flex:0 0 auto;
+  background:none; border:0; cursor:pointer;
+  padding:2px 6px; border-radius:var(--radius-sm);
+  color:var(--text-muted); font-size:12px; line-height:1;
+  /* Fora da região de arraste, senão clicar no ✕ move a janela. */
+  -webkit-app-region:no-drag;
+}
+.md-taskwindow-close:hover{ background:var(--surface); color:var(--text) }
+.md-taskwindow-body{
+  flex:1; min-height:0; overflow-y:auto;
+  padding:10px;
+  display:flex; flex-direction:column; gap:8px;
+}
+.md-taskwindow-meta{
+  display:flex; flex-wrap:wrap; gap:8px;
+  font-size:12px; color:var(--text-muted);
+}
+.md-taskwindow-desc{
+  font-size:12px; line-height:1.5;
+  white-space:pre-wrap; word-break:break-word;
+  color:var(--text);
+}
+
+/* Tarefa com janela destacada aberta.
+   Ao contrário das notas, a tarefa NÃO sai do quadro — esconder era a raiz do
+   "some e não volta". Fica marcada, para o usuário saber onde ela está. */
+.md-task--poppedout{
+  border-style:dashed;
+  opacity:.82;
+}
+
 /* Estados de carregamento/erro da janela de nota */
 .note-window-state{
   width:100vw; height:100vh;
@@ -886,3 +1048,33 @@ html.note-window-body, body.note-window-body{
 @media (prefers-reduced-motion:reduce){
   *, *::before, *::after{animation:none !important; transition:none !important; scroll-behavior:auto !important}
 }
+
+/* Indicador de como o quadro se mantém atualizado.
+   Existe porque "demorou 5 minutos para aparecer" precisa ter uma explicação
+   visível — senão parece bug em vez de polling. */
+.md-livesync{
+  display:inline-flex; align-items:center; gap:5px;
+  padding:2px 8px; border-radius:var(--radius-pill);
+  border:1px solid var(--line); background:var(--surface-2);
+  font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--text-muted);
+  cursor:help;
+}
+.md-livesync::before{
+  content:""; width:6px; height:6px; border-radius:50%;
+  background:var(--text-faint);
+}
+.md-livesync--on{ color:var(--text) }
+.md-livesync--on::before{ background:var(--prio-low) }
+
+/* Diagnóstico da última sincronização automática.
+   A falha do sync automático é silenciosa de propósito (VPN caída é rotina);
+   este bloco é onde ela fica legível para quem for procurar. */
+.md-syncstate{
+  display:flex; flex-direction:column; gap:3px;
+  padding:8px 10px; border-radius:var(--radius-sm);
+  background:var(--surface-2); border:1px solid var(--line);
+  font-size:12px;
+}
+.md-syncstate--error{ border-color:var(--prio-urgent) }
+.md-syncstate [role="alert"]{ color:var(--prio-urgent); font-weight:600 }

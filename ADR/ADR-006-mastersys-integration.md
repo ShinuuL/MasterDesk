@@ -22,7 +22,10 @@ Cada endpoint e cada campo usados aqui têm origem rastreável:
 | Prefixos `/api/tasks`, `/api/tickets` | `shared/infra/http/app.ts` |
 | `GET /api/tasks/users/:userId` → array **cru** de `TaskDTO` | `modules/tasks/routes.ts`, `TaskController.getByUser` (`res.json(tasks)`) |
 | Campos de `TaskDTO` | `modules/tasks/dtos/TaskDTO.ts` |
-| `GET /api/tickets?assignedTo=<id>` → `{success, data:[TicketDTO]}` | `modules/tickets/routes.ts`, `TicketController.list` + `filtersSchema` |
+| `GET /api/tickets/paginated?assignedTo=<id>&createdAtStart=&page=&pageSize=` → `{success, data:[TicketDTO], pagination:{page,pageSize,total,totalPages}}` | `modules/tickets/routes.ts:170`, `TicketController.listPaginated` + `filtersSchema` (`pageSize` máx. 200) |
+| `GET /api/tickets` (não usado) **não tem `LIMIT` nem filtro de status padrão** | `TicketRepository.findAll` — só `WHERE 1=1` + filtros passados |
+| `tasks` traz `AND t.status != 'finished'` e `AND t.is_internal = 0` por padrão | `TaskRepository.findAll` |
+| Status de chamado são cadastráveis e **sem flag de status terminal** | `ticket_statuses` (`migrations.ts:2225`), `TicketStatus = (string & {}) \| …` |
 | Campos de `TicketDTO`, prioridades `low\|medium\|high\|critical` | `modules/tickets/dtos/index.ts` |
 | Regra de prazo efetivo | `modules/tasks/utils/overdue.ts` (`getEffectiveDueDate`) |
 
@@ -67,7 +70,7 @@ Mesmo contrato, porta diferente.
 ### (c) MasterDesk consulta a API do Mastersys — **escolhida**
 
 O MasterDesk autentica com as credenciais do próprio usuário e lê
-`GET /api/tasks/users/:userId` e `GET /api/tickets?assignedTo=`.
+`GET /api/tasks/users/:userId` e `GET /api/tickets/paginated?assignedTo=`.
 
 - **A favor:** nenhuma porta de escuta e nenhuma API key compartilhada — a
   superfície de ataque desaparece; não depende de navegador aberto nem de app
@@ -82,6 +85,31 @@ O MasterDesk autentica com as credenciais do próprio usuário e lê
 **Opção (c): o MasterDesk consulta a API do Mastersys, em modo somente leitura.**
 
 Decidido pelo DEV em 2026-09-02.
+
+### Emenda de 2026-09-02 — recorte dos chamados por data, não por status
+
+`GET /api/tickets` devolveria todo chamado já atribuído ao usuário: o
+`TicketRepository.findAll` não tem `LIMIT` nem filtro de status padrão, e cada
+linha carrega a `description` inteira. Com timeout de 15 s e acesso por VPN,
+isso é um risco operacional, não teórico.
+
+Passamos a usar `GET /api/tickets/paginated` com `createdAtStart` (janela
+padrão de 90 dias, configurável em `mastersys.ticket_window_days`) e
+`pageSize=200` — o teto aceito pelo `filtersSchema`.
+
+**Por que a janela é por data e não por status:** o filtro desejável seria "só
+os abertos", mas ele não é expressável com segurança. A tabela
+`ticket_statuses` tem apenas `value/label/color/display_order/is_active` e
+**nenhuma flag de status terminal**, e `TicketStatus` aceita qualquer string
+porque o cliente cadastra status próprios em Configurações. Uma allowlist de
+slugs abertos perderia chamados em silêncio no dia em que alguém criasse um
+status novo — falha pior que uma resposta grande. A data não depende do
+vocabulário de status.
+
+**Custo aceito:** um chamado aberto mais antigo que a janela não aparece. A
+fila de trabalho real são as *tarefas*, e este ramo só cobre chamados que ainda
+não têm tarefa no quadro. A janela é exposta em `mastersys_status` justamente
+para que essa ausência seja legível na UI em vez de parecer bug.
 
 ### Somente leitura, deliberadamente
 
@@ -199,3 +227,52 @@ configuração, então "concluído" para chamados é decidido por `closedAt`/
 - Abrir o chamado no navegador a partir do card (precisa da rota da UI do
   Mastersys, ainda não verificada).
 - Validar cofre e sincronização em macOS e Linux.
+
+### Emenda de 2026-09-02 — catálogo de status e item "parado"
+
+Um chamado em `pos_atendimento` aparecia no quadro marcado como atrasado e
+disparava lembrete. Pós-atendimento é estado de espera: o prazo original não diz
+mais nada sobre urgência. Além disso o status era exibido como slug cru
+(`pos atendimento`) em texto apagado no fim do selo, e passava despercebido.
+
+**Espelhamos o catálogo** de `GET /api/ticket-statuses` (só exige autenticação)
+na tabela `mastersys_status_catalog`, atualizado a cada sincronização. De lá vêm
+o rótulo em pt-BR, a cor do cadastro e o `default_filter`.
+
+Espelhar em vez de hardcodar porque o Mastersys permite cadastrar status
+próprios: uma lista fixa aqui ficaria desatualizada em silêncio, e um status
+novo apareceria sem rótulo, sem cor e fora do filtro padrão.
+
+**`ExternalRef.status_parked`** é derivado no adapter como
+`is_final || pauses_sla || !default_filter`, e consumido em três lugares: o
+cálculo de atraso na UI, o default do filtro de status, e
+`Task::next_reminder_fire_at`, que devolve `None` para item parado — a regra vive
+no domínio para valer também no agendamento avulso de `TaskService`, não só na
+sincronização.
+
+O termo que de fato pega `pos_atendimento` é `!default_filter`, porque
+`pauses_sla` é opt-in do admin e nasce desligado em todos os status
+(`migrations.ts:4451`), enquanto `default_filter = 0` é aplicado
+deterministicamente a `finalizado`, `cancelado` e `pos_atendimento`
+(`migrations.ts:4472-4473`). Isso estica a semântica original de
+`default_filter` ("vem pré-marcado no filtro") para "não é trabalho ativo" —
+desvio assumido por ser o único sinal determinístico disponível.
+
+**Cobertura parcial, por limitação da origem:** `TaskDTO` não expõe o status do
+chamado, só o da tarefa (`pending`/`in_progress`/…), que é outro vocabulário.
+Então itens que chegam pelo ramo de *tarefas* nunca são marcados como parados
+por status de chamado. Não é problema na prática: `pos_atendimento` só existe
+como status de chamado, e uma tarefa pendente é trabalho ativo mesmo quando o
+chamado dela está em espera.
+
+**Cor não é aplicada crua.** O hex do Mastersys passa por `noteSurface()`, que
+ajusta luminosidade sem mexer no matiz até bater o piso de contraste AA nos dois
+temas (ADR-009). Um `#f59e0b` do suporte seria ilegível no tema escuro.
+
+### Emenda de 2026-09-02 — busca ao vivo é consulta, não espelho
+
+`GET /api/tickets/search?q=` (mínimo 3 caracteres) alcança chamados fora da fila
+do usuário. O resultado **não pode** ser gravado como espelho: a sincronização
+seguinte não o veria na fila e o `retire_mirror` o apagaria, junto com qualquer
+anotação. A ação oferecida é criar uma **tarefa local** (`external = null`), que
+sobrevive ao sync em troca de não acompanhar mudanças do chamado.

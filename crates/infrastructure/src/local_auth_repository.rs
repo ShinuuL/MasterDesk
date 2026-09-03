@@ -21,8 +21,8 @@ use argon2::{
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use masterdesk_domain::{
-    ports::AuthenticationProvider, validate_password, validate_username, DomainError, DomainResult,
-    User, UserId,
+    normalize_username, ports::AuthenticationProvider, validate_password, validate_username,
+    DomainError, DomainResult, User, UserId,
 };
 use sqlx::SqlitePool;
 use uuid::Uuid;
@@ -134,6 +134,12 @@ fn row_to_user(row: UserRow) -> DomainResult<User> {
     User::reconstitute(id, row.username, row.password_hash, created_at)
 }
 
+/// Uma frase só para "não existe" e "senha errada".
+///
+/// Distinguir as duas ajudaria quem está tentando descobrir que contas existem
+/// nesta máquina, e não ajuda quem esqueceu a senha.
+const WRONG_CREDENTIALS: &str = "usuário ou senha incorretos";
+
 fn map_sqlx_err(_e: sqlx::Error) -> DomainError {
     // Nunca vazar detalhes de SQL / credenciais para o domínio / UI.
     DomainError::Persistence
@@ -150,7 +156,10 @@ impl AuthenticationProvider for LocalAuthRepository {
         validate_username(username)?;
         validate_password(password)?;
 
-        let username = username.trim().to_string();
+        // `normalize_username` e não `trim`: colapsa espaços internos também,
+        // senão "ana  paula" e "ana paula" viram duas contas e quem se
+        // cadastrou com a primeira não entra digitando a segunda.
+        let username = normalize_username(username);
 
         // Duplicata → Conflict
         let existing: Option<String> =
@@ -160,7 +169,9 @@ impl AuthenticationProvider for LocalAuthRepository {
                 .await
                 .map_err(map_sqlx_err)?;
         if existing.is_some() {
-            return Err(DomainError::Conflict("username already exists".into()));
+            return Err(DomainError::Conflict(
+                "já existe uma conta com esse nome nesta máquina".into(),
+            ));
         }
 
         // Hash da senha (nunca plaintext no banco).
@@ -185,25 +196,27 @@ impl AuthenticationProvider for LocalAuthRepository {
     }
 
     async fn login(&self, username: &str, password: &str) -> DomainResult<User> {
-        let username = username.trim();
+        let username = normalize_username(username);
 
         let row: Option<UserRow> = sqlx::query_as(
             "SELECT id, username, password_hash, created_at FROM users WHERE username = ?1 COLLATE NOCASE",
         )
-        .bind(username)
+        .bind(&username)
         .fetch_optional(&self.pool)
         .await
         .map_err(map_sqlx_err)?;
 
         let row = match row {
             Some(r) => r,
-            None => return Err(DomainError::Unauthorized),
+            // Mesma mensagem de "senha errada", de propósito: dizer "usuário
+            // não existe" revelaria quais contas existem nesta máquina.
+            None => return Err(DomainError::unauthorized(WRONG_CREDENTIALS)),
         };
 
         // Verifica a senha contra o hash armazenado. Falha (user inexistente OU
         // senha errada) retorna o mesmo `Unauthorized` — sem vazar qual parte falhou.
         if !verify_password(password, &row.password_hash) {
-            return Err(DomainError::Unauthorized);
+            return Err(DomainError::unauthorized(WRONG_CREDENTIALS));
         }
 
         let user = row_to_user(row)?;
@@ -273,12 +286,12 @@ mod tests {
         // senha errada
         assert!(matches!(
             repo.login("bob", "wrongpassword").await,
-            Err(DomainError::Unauthorized)
+            Err(DomainError::Unauthorized(_))
         ));
         // usuário inexistente
         assert!(matches!(
             repo.login("ghost", "password123").await,
-            Err(DomainError::Unauthorized)
+            Err(DomainError::Unauthorized(_))
         ));
     }
 

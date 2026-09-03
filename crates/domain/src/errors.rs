@@ -28,8 +28,25 @@ pub enum DomainError {
     #[error("integration failure: {0}")]
     Integration(String),
 
-    #[error("unauthorized")]
-    Unauthorized,
+    /// Ação recusada por credencial ou sessão.
+    ///
+    /// Carrega o motivo **já em português e voltado ao usuário**, porque
+    /// "unauthorized" cobria situações que exigem ações opostas: senha errada
+    /// (corrigir e tentar de novo), sessão expirada (reconectar), conta inativa
+    /// (falar com o administrador) e falta de permissão (não há o que tentar).
+    /// Uma palavra só para todas elas deixava o usuário sem saber o que fazer.
+    ///
+    /// Quem levanta escreve a frase; o `Display` a devolve como está, sem
+    /// prefixo, porque ela vai direto para a tela.
+    #[error("{0}")]
+    Unauthorized(String),
+}
+
+impl DomainError {
+    /// Atalho para os casos que não têm motivo mais específico a oferecer.
+    pub fn unauthorized(reason: impl Into<String>) -> Self {
+        DomainError::Unauthorized(reason.into())
+    }
 }
 
 pub type DomainResult<T> = Result<T, DomainError>;

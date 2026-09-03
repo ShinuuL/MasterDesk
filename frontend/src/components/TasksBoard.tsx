@@ -1,8 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Task, Priority } from "../types";
+import type { ExternalWorkItem, MastersysTicketStatus, Task, Priority } from "../types";
 import * as api from "../api";
 import { TaskNotes } from "./TaskNotes";
 import { MastersysPanel } from "./MastersysPanel";
+import { TaskFilters } from "./TaskFilters";
+import { StatusBadge } from "./StatusBadge";
+import {
+  applyTaskFilters,
+  clientsInTasks,
+  isOverdue,
+  isParked,
+  loadFilters,
+  saveFilters,
+  type TaskFilterState,
+} from "../tasks/filter";
 
 const PRESET_THRESHOLDS: { label: string; minutes: number }[] = [
   { label: "5m", minutes: 5 },
@@ -49,11 +60,6 @@ function formatDeadline(iso: string | null): string {
   return d.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 }
 
-/** `aguardando_retorno_cliente` → `aguardando retorno cliente`. */
-function humanizeStatus(raw: string): string {
-  return raw.replace(/_/g, " ").trim();
-}
-
 export function TasksBoard() {
   const [pending, setPending] = useState<Task[]>([]);
   const [completed, setCompleted] = useState<Task[]>([]);
@@ -71,6 +77,89 @@ export function TasksBoard() {
   const [noteCounts, setNoteCounts] = useState<Record<string, number>>({});
   const [showMastersys, setShowMastersys] = useState(false);
 
+  // Filtro e busca. O catálogo entra vazio e é preenchido logo depois; por
+  // isso `loadFilters` roda de novo quando ele chega (ver efeito abaixo) —
+  // sem catálogo não há como saber quais status são o default da origem.
+  const [catalog, setCatalog] = useState<MastersysTicketStatus[]>([]);
+  const [filters, setFilters] = useState<TaskFilterState>(() => loadFilters([]));
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [remoteResults, setRemoteResults] = useState<ExternalWorkItem[] | null>(null);
+  const [remoteSearching, setRemoteSearching] = useState(false);
+  /**
+   * O filtro já foi reconciliado com o catálogo?
+   *
+   * Trava a gravação até lá. Sem isso, o efeito de salvar rodava no primeiro
+   * render — quando o catálogo ainda está vazio e o default é "mostrar tudo" —
+   * e gravava `statuses: []`. Na volta, esse valor gravado vencia o default de
+   * verdade, e no primeiro uso o pós-atendimento aparecia. Ou seja: o bug era
+   * exatamente o comportamento que este recurso existe para corrigir.
+   */
+  const [hydrated, setHydrated] = useState(false);
+  /**
+   * Tarefas com janela destacada agora.
+   *
+   * Vem do gerenciador de janelas, não de estado acumulado aqui — foi o bug do
+   * pop-out de nota, onde trocar de aba desmontava o componente, zerava o
+   * conjunto e a nota voltava ao quadro com a janela dela ainda aberta.
+   */
+  const [poppedOut, setPoppedOut] = useState<Set<string>>(new Set());
+  /** Como o quadro se mantém atualizado: tempo real (segundos) ou polling. */
+  const [liveSync, setLiveSync] = useState<{ realtime: boolean; pollSecs: number } | null>(null);
+
+  /**
+   * Alinha as janelas abertas com as tarefas que existem.
+   *
+   * Duas coisas ao mesmo tempo:
+   *
+   * 1. Atualiza quais tarefas estão destacadas (para o quadro marcá-las).
+   * 2. **Fecha janelas órfãs.** Um espelho do Mastersys que saiu da fila do
+   *    usuário é apagado pelo `retire_mirror`, e a janela dele ficaria aberta
+   *    mostrando "tarefa indisponível" para sempre. Isso é caso real, não
+   *    hipótese: acontece a cada sincronização em que um chamado é reatribuído.
+   *
+   * Em falha o conjunto fica vazio, e não preservado: em dúvida é melhor o
+   * quadro mostrar a tarefa como não-destacada — pior seria marcá-la como
+   * destacada sem janela alguma.
+   */
+  const reconcileWindows = async (existing: Task[]) => {
+    try {
+      const openIds = await api.openTaskWindowIds();
+      const alive = new Set(existing.map((t) => t.id));
+      const orphans = openIds.filter((id) => !alive.has(id));
+      await Promise.all(
+        orphans.map((id) => api.closeTaskWindow(id).catch(() => {})),
+      );
+      setPoppedOut(new Set(openIds.filter((id) => alive.has(id))));
+    } catch {
+      setPoppedOut(new Set());
+    }
+  };
+
+  const handlePopOut = async (id: string) => {
+    setError(null);
+    try {
+      await api.openTaskWindow(id);
+      setPoppedOut((prev) => new Set(prev).add(id));
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const handleClosePopOut = async (id: string) => {
+    try {
+      await api.closeTaskWindow(id);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setPoppedOut((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
   const refresh = async () => {
     try {
       setLoading(true);
@@ -78,6 +167,7 @@ export function TasksBoard() {
       const [p, c] = await Promise.all([api.listPendingTasks(), api.listCompletedTasks()]);
       setPending(p);
       setCompleted(c);
+      await reconcileWindows([...p, ...c]);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -88,6 +178,121 @@ export function TasksBoard() {
   useEffect(() => {
     void refresh();
   }, []);
+
+  // Catálogo de status: lê só o banco local, então é rápido e funciona
+  // offline. Chega depois do primeiro render, e é aí que o filtro salvo pode
+  // finalmente ser reconciliado com o default da origem.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const cat = await api.mastersysStatusCatalog();
+        if (cancelled) return;
+        setCatalog(cat);
+        setFilters(loadFilters(cat));
+      } catch {
+        // Catálogo é dado de apresentação: sem ele o quadro mostra o slug sem
+        // cor e o filtro de status desaparece, mas nada deixa de funcionar.
+      } finally {
+        // Libera a gravação mesmo em falha: sem catálogo o usuário ainda
+        // filtra por cliente e prazo, e essa escolha merece persistir.
+        if (!cancelled) setHydrated(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    saveFilters(filters);
+  }, [filters, hydrated]);
+
+  // Como a sincronização está funcionando agora. Reconsultado após cada sync
+  // automático porque o canal de tempo real pode ter caído nesse meio-tempo.
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const [realtime, pollSecs] = await Promise.all([
+          api.mastersysRealtimeConnected(),
+          api.mastersysPollInterval(),
+        ]);
+        if (!cancelled) setLiveSync({ realtime, pollSecs });
+      } catch {
+        if (!cancelled) setLiveSync(null);
+      }
+    };
+    void check();
+    // 30 s: barato (só lê estado em memória do Rust) e suficiente para o
+    // indicador não ficar mentindo por muito tempo depois de uma queda.
+    const timer = setInterval(() => void check(), 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
+
+  // Sincronização automática avisa por evento quando mudou algo. Sem isto o
+  // quadro só refletiria a mudança no próximo clique do usuário.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const un = await api.onMastersysSynced(() => {
+          if (!cancelled) void refresh();
+        });
+        if (!cancelled) unlisten = un;
+        else un();
+      } catch {
+        // Fora do runtime do Tauri — nada a escutar.
+      }
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Quando a janela principal recupera o foco, reconcilia: o usuário pode ter
+  // fechado um pop-out pelo ✕ dele, e o quadro não fica sabendo de outra forma.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        const un = await getCurrentWindow().onFocusChanged(({ payload }) => {
+          if (payload && !cancelled) void refresh();
+        });
+        if (!cancelled) unlisten = un;
+        else un();
+      } catch {
+        // Fora do runtime do Tauri — nada a observar.
+      }
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 300 ms, o mesmo do suporte: filtrar a cada tecla numa lista grande trava a
+  // digitação, e esperar mais que isso já se sente como travamento.
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(searchInput), 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  // Trocar o termo invalida o resultado remoto: manter na tela um resultado de
+  // outra busca é pior que não mostrar nada.
+  useEffect(() => {
+    setRemoteResults(null);
+  }, [searchInput]);
 
   // Contador de anotações por tarefa, para o board mostrar o número sem que o
   // usuário precise expandir cada card.
@@ -116,6 +321,67 @@ export function TasksBoard() {
     () => [...pending, ...completed].filter((t) => t.external !== null).length,
     [pending, completed],
   );
+
+  const visiblePending = useMemo(
+    () => applyTaskFilters(pending, filters, search),
+    [pending, filters, search],
+  );
+  const visibleCompleted = useMemo(
+    () => applyTaskFilters(completed, filters, search),
+    [completed, filters, search],
+  );
+  const clients = useMemo(
+    () => clientsInTasks([...pending, ...completed]),
+    [pending, completed],
+  );
+  const hiddenCount =
+    pending.length + completed.length - (visiblePending.length + visibleCompleted.length);
+
+  const handleRemoteSearch = async () => {
+    setRemoteSearching(true);
+    setError(null);
+    try {
+      setRemoteResults(await api.mastersysSearchTickets(searchInput));
+    } catch (e) {
+      setError(String(e));
+      setRemoteResults(null);
+    } finally {
+      setRemoteSearching(false);
+    }
+  };
+
+  /**
+   * Cria uma tarefa LOCAL a partir de um chamado consultado.
+   *
+   * Não grava espelho de propósito: um chamado que não está atribuído a você
+   * não apareceria na próxima sincronização, e o `retire_mirror` apagaria a
+   * tarefa junto com qualquer anotação sem aviso. Tarefa local não corre esse
+   * risco — em troca, ela não acompanha mudanças do chamado.
+   */
+  const handleImportAsLocal = async (item: ExternalWorkItem) => {
+    setError(null);
+    try {
+      const ref = item.reference;
+      const origin = [
+        ref.ticket ? `Chamado #${ref.ticket}` : null,
+        ref.client,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      await api.createTask({
+        title: item.title,
+        description: [origin, item.description].filter(Boolean).join("\n\n"),
+        priority: item.priority,
+        // `CreateTaskPayload.deadline` é opcional (`string | undefined`), e o
+        // item da origem usa `null` para "sem prazo".
+        deadline: item.deadline ?? undefined,
+      });
+      setRemoteResults(null);
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
 
   const toggleThreshold = (minutes: number) => {
     setThresholds((prev) => {
@@ -211,9 +477,13 @@ export function TasksBoard() {
   };
 
   const renderTask = (t: Task) => {
-    const overdue = !t.completed && t.deadline !== null && new Date(t.deadline) <= new Date();
+    // `isOverdue` mora em `tasks/filter.ts` para ser testável e para a regra
+    // ser uma só: item parado na origem não é atrasado, aqui e no filtro.
+    const overdue = isOverdue(t);
+    const parked = isParked(t);
     const dueSoon =
       !t.completed &&
+      !parked &&
       t.deadline !== null &&
       new Date(t.deadline) <= new Date(Date.now() + 30 * 60 * 1000) &&
       new Date(t.deadline) > new Date();
@@ -224,11 +494,23 @@ export function TasksBoard() {
     return (
       <article
         key={t.id}
-        className={`md-task ${toneClass} ${t.external ? "md-task--external" : ""}`}
+        className={`md-task ${toneClass} ${t.external ? "md-task--external" : ""} ${
+          poppedOut.has(t.id) ? "md-task--poppedout" : ""
+        }`}
         style={{ borderLeftColor: PRIORITY_VAR[t.priority] }}
       >
         {t.external && (
           <div className="md-stamp">
+            {/* Status primeiro: é o dado que decide se o item precisa de ação
+                agora. Antes ficava no fim da linha em texto apagado e passava
+                despercebido. */}
+            {t.external.status_label && (
+              <StatusBadge
+                statusLabel={t.external.status_label}
+                catalog={catalog}
+                parked={parked}
+              />
+            )}
             <span className="md-stamp-origin">
               {t.external.kind === "Ticket" ? "Chamado" : "Tarefa"} · Mastersys
             </span>
@@ -238,11 +520,6 @@ export function TasksBoard() {
             {t.external.client && (
               <span className="md-stamp-client" title={t.external.client}>
                 {t.external.client}
-              </span>
-            )}
-            {t.external.status_label && (
-              <span className="md-stamp-status">
-                {humanizeStatus(t.external.status_label)}
               </span>
             )}
           </div>
@@ -255,6 +532,11 @@ export function TasksBoard() {
           </span>
           {overdue && <span className="md-due md-due--overdue">• atrasada</span>}
           {dueSoon && <span className="md-due md-due--soon">• vence em breve</span>}
+          {/* Explica a ausência do "atrasada" num item de prazo vencido — sem
+              isto pareceria bug de quem conhece o chamado. */}
+          {parked && t.deadline !== null && new Date(t.deadline) <= new Date() && (
+            <span className="md-due md-due--parked">• aguardando, sem lembrete</span>
+          )}
         </div>
 
         {t.description && <div className="md-task-desc">{t.description}</div>}
@@ -307,6 +589,24 @@ export function TasksBoard() {
             </span>
           </button>
 
+          {poppedOut.has(t.id) ? (
+            <button
+              onClick={() => void handleClosePopOut(t.id)}
+              className="md-btn md-btn--ghost"
+              title="Fechar a janela destacada desta tarefa"
+            >
+              Recolher
+            </button>
+          ) : (
+            <button
+              onClick={() => void handlePopOut(t.id)}
+              className="md-btn md-btn--ghost"
+              title="Abrir esta tarefa em janela própria, por cima das outras"
+            >
+              Destacar
+            </button>
+          )}
+
           <button
             onClick={() => void handleDelete(t)}
             className="md-btn md-btn--danger"
@@ -355,8 +655,87 @@ export function TasksBoard() {
         </button>
         <span className="md-count">
           {pending.length} pendentes · {completed.length} concluídas
+          {hiddenCount > 0 && ` · ${hiddenCount} oculta(s) por filtro`}
         </span>
+
+        {liveSync && externalCount > 0 && (
+          <span
+            className={`md-livesync ${liveSync.realtime ? "md-livesync--on" : ""}`}
+            title={
+              liveSync.realtime
+                ? "Conectado ao canal de tempo real do Mastersys: mudanças aparecem em segundos."
+                : `Tempo real indisponível — o quadro se atualiza a cada ${Math.round(
+                    liveSync.pollSecs / 60,
+                  )} min. Nada deixa de sincronizar, só demora mais.`
+            }
+          >
+            {liveSync.realtime
+              ? "tempo real"
+              : `a cada ${Math.round(liveSync.pollSecs / 60)} min`}
+          </span>
+        )}
       </header>
+
+      <TaskFilters
+        filters={filters}
+        onChange={setFilters}
+        catalog={catalog}
+        clients={clients}
+        searchInput={searchInput}
+        onSearchInput={setSearchInput}
+        onRemoteSearch={handleRemoteSearch}
+        remoteSearching={remoteSearching}
+      />
+
+      {remoteResults !== null && (
+        <section className="md-remote-results">
+          <div className="md-eyebrow" style={{ marginBottom: 8 }}>
+            Consulta no Mastersys · {remoteResults.length} resultado(s)
+          </div>
+          {remoteResults.length === 0 ? (
+            <div className="md-quiet">Nenhum chamado encontrado para esse termo.</div>
+          ) : (
+            <>
+              <p className="md-filter-hint" style={{ marginTop: 0 }}>
+                Isto é consulta, não sincronização. Um chamado que não está
+                atribuído a você não pode virar espelho no quadro — a próxima
+                sincronização o apagaria. Importar cria uma <strong>tarefa
+                local</strong>, que sobrevive, mas não acompanha mudanças do
+                chamado.
+              </p>
+              <ul className="md-remote-list">
+                {remoteResults.map((item) => (
+                  <li key={item.reference.external_id} className="md-remote-item">
+                    <div className="md-stamp">
+                      {item.reference.status_label && (
+                        <StatusBadge
+                          statusLabel={item.reference.status_label}
+                          catalog={catalog}
+                        />
+                      )}
+                      {item.reference.ticket && (
+                        <span className="md-stamp-ticket">#{item.reference.ticket}</span>
+                      )}
+                      {item.reference.client && (
+                        <span className="md-stamp-client" title={item.reference.client}>
+                          {item.reference.client}
+                        </span>
+                      )}
+                    </div>
+                    <span className="md-remote-title">{item.title}</span>
+                    <button
+                      className="md-btn md-btn--ghost"
+                      onClick={() => void handleImportAsLocal(item)}
+                    >
+                      Criar tarefa local
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </section>
+      )}
 
       <div className="md-create-bar" style={{ gap: 12 }}>
         <div className="md-field" style={{ flex: "0 0 200px" }}>
@@ -528,27 +907,31 @@ export function TasksBoard() {
             <h3 className="md-eyebrow" style={{ margin: "2px 0 10px" }}>
               Pendentes
             </h3>
-            {pending.length === 0 ? (
+            {visiblePending.length === 0 ? (
               <div className="md-quiet" style={{ marginBottom: 12 }}>
-                Nenhuma tarefa pendente — bom trabalho.
+                {pending.length === 0
+                  ? "Nenhuma tarefa pendente — bom trabalho."
+                  : "Nenhuma pendente casa com o filtro atual."}
               </div>
             ) : (
-              pending.map(renderTask)
+              visiblePending.map(renderTask)
             )}
             <h3 className="md-eyebrow" style={{ margin: "18px 0 10px" }}>
               Concluídas{" "}
-              {completed.length > 0 && (
+              {visibleCompleted.length > 0 && (
                 <span style={{ fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>
-                  · {completed.length}
+                  · {visibleCompleted.length}
                 </span>
               )}
             </h3>
-            {completed.length === 0 ? (
+            {visibleCompleted.length === 0 ? (
               <div style={{ fontSize: 13, color: "var(--text-muted)", padding: "6px 0" }}>
-                Nenhuma tarefa concluída ainda.
+                {completed.length === 0
+                  ? "Nenhuma tarefa concluída ainda."
+                  : "Nenhuma concluída casa com o filtro atual."}
               </div>
             ) : (
-              completed.map(renderTask)
+              visibleCompleted.map(renderTask)
             )}
           </>
         )}

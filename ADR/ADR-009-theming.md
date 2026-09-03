@@ -142,3 +142,34 @@ Garantido por teste: 36 combinações cor × tema, todas ≥ 4,5:1
 | Escopo | `devDependencies` — não entra no bundle |
 | Por que | é o runner nativo do Vite, que o projeto já usa (ADR-002); reaproveita o mesmo `tsconfig` e resolução de módulos, sem configuração adicional |
 | Alternativas | Jest (exige configuração de transform própria para TS/ESM); nenhum teste (rejeitado: o piso de contraste é uma invariante que precisa de proteção contra regressão) |
+
+## Acoplamento com a CSP do app (2026-09-02)
+
+O `<style>` inline no `frontend/index.html` — o que pinta o fundo antes de
+qualquer CSS carregar, evitando um frame branco ao abrir no tema escuro — é a
+única razão pela qual a CSP de produção precisa de `'unsafe-inline'` em
+`style-src`:
+
+```
+style-src 'self' 'unsafe-inline'
+```
+
+Isso é deliberado e as duas "correções" óbvias estão erradas:
+
+- **Tirar o `'unsafe-inline'`** faz o bloco inline ser bloqueado, e o flash
+  branco volta — silenciosamente, porque nada quebra além do primeiro frame.
+- **Mover o CSS para a folha de estilo** derrota o propósito: ele precisa
+  valer *antes* do `<link>` resolver.
+
+O risco de `'unsafe-inline'` aqui é baixo porque `default-src 'self'` não
+permite nenhuma origem externa: exfiltração via CSS precisa de uma URL para
+onde vazar, e não há nenhuma permitida. A proteção que importa de verdade é
+`script-src 'self'`, sem `'unsafe-inline'` nem `'unsafe-eval'` — e o código não
+usa `eval`, `new Function`, `innerHTML` nem `dangerouslySetInnerHTML`.
+
+Os estilos inline do React (`style={{…}}`) **não** dependem disso: o React
+escreve em `element.style` pelo CSSOM, que a CSP não governa.
+
+A alternativa a `'unsafe-inline'` seria um hash `'sha256-…'` do bloco. Foi
+rejeitada por fragilidade: qualquer edição no CSS do fundo invalida o hash e
+traz o flash de volta sem erro visível.

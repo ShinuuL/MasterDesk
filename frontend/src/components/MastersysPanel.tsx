@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { MastersysStatus, SyncReport } from "../types";
+import type { LastSync, MastersysStatus, SyncReport } from "../types";
 import * as api from "../api";
 
 interface Props {
@@ -52,6 +52,12 @@ function describeReport(report: SyncReport): { label: string; value: number }[] 
 }
 
 export function MastersysPanel({ onClose, onTasksChanged }: Props) {
+  // Diagnóstico da sincronização automática. Sem isto o usuário não consegue
+  // distinguir "está demorando" de "não está acontecendo", porque a falha do
+  // sync automático é silenciosa de propósito.
+  const [lastSync, setLastSync] = useState<LastSync | null>(null);
+  const [pollSecs, setPollSecs] = useState<number | null>(null);
+  const [realtime, setRealtime] = useState<boolean | null>(null);
   const [status, setStatus] = useState<MastersysStatus | null>(null);
   const [endpoint, setEndpoint] = useState("");
   const [identifier, setIdentifier] = useState("");
@@ -141,6 +147,33 @@ export function MastersysPanel({ onClose, onTasksChanged }: Props) {
       await refresh();
       return `Conectado como ${identity.display_name}.`;
     });
+
+  // Recarrega o diagnóstico a cada 10 s enquanto o painel está aberto. Só lê
+  // estado em memória do Rust, então é barato.
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const [ls, secs, rt] = await Promise.all([
+          api.mastersysLastSync(),
+          api.mastersysPollInterval(),
+          api.mastersysRealtimeConnected(),
+        ]);
+        if (cancelled) return;
+        setLastSync(ls);
+        setPollSecs(secs);
+        setRealtime(rt);
+      } catch {
+        // Painel de diagnóstico não pode derrubar o painel.
+      }
+    };
+    void load();
+    const timer = setInterval(() => void load(), 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
 
   const handleSync = () =>
     run("sync", async () => {
@@ -294,7 +327,7 @@ export function MastersysPanel({ onClose, onTasksChanged }: Props) {
                     />
                   </div>
                   <p className="md-panel-note">
-                    A senha é usada uma vez e descartada. O MasterDesk guarda
+                    A senha é usada uma vez e descartada. O MasterNote guarda
                     apenas o token de sessão, no cofre de credenciais do
                     Windows.
                   </p>
@@ -331,6 +364,58 @@ export function MastersysPanel({ onClose, onTasksChanged }: Props) {
                     </button>
                   ))}
                 </div>
+              </section>
+
+              <section className="md-panel-section">
+                <div className="md-eyebrow">Sincronização automática</div>
+                <p className="md-panel-note">
+                  {realtime === true
+                    ? "Conectado ao canal de tempo real: mudanças no Mastersys aparecem em segundos."
+                    : pollSecs !== null
+                      ? `Tempo real indisponível. O quadro se atualiza a cada ${Math.round(
+                          pollSecs / 60,
+                        )} min — nada deixa de sincronizar, só demora mais.`
+                      : "Verificando…"}
+                </p>
+
+                {lastSync === null ? (
+                  <p className="md-panel-note">
+                    Nenhuma sincronização automática rodou desde que o app
+                    abriu. A primeira acontece em até{" "}
+                    {pollSecs !== null ? Math.round(pollSecs / 60) : 5} min, ou
+                    agora se você usar o botão abaixo.
+                  </p>
+                ) : (
+                  <div
+                    className={`md-syncstate ${
+                      lastSync.error ? "md-syncstate--error" : ""
+                    }`}
+                  >
+                    <strong>
+                      {lastSync.error ? "Falhou" : "Concluída"} —{" "}
+                      {new Date(lastSync.at).toLocaleString("pt-BR", {
+                        dateStyle: "short",
+                        timeStyle: "medium",
+                      })}
+                    </strong>
+                    <span className="md-panel-note" style={{ margin: 0 }}>
+                      Disparada por: {lastSync.trigger}
+                    </span>
+                    {lastSync.error ? (
+                      <span role="alert">{lastSync.error}</span>
+                    ) : (
+                      lastSync.report && (
+                        <span className="md-panel-note" style={{ margin: 0 }}>
+                          {lastSync.report.imported} importada(s) ·{" "}
+                          {lastSync.report.updated} atualizada(s) ·{" "}
+                          {lastSync.report.removed} removida(s)
+                          {lastSync.report.kept_with_notes > 0 &&
+                            ` · ${lastSync.report.kept_with_notes} preservada(s) com anotações`}
+                        </span>
+                      )
+                    )}
+                  </div>
+                )}
               </section>
             </>
           )}

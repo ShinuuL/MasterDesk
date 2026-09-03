@@ -21,6 +21,22 @@ pub enum SettingKey {
     MastersysUserName,
     /// E-mail do usuário no Mastersys.
     MastersysUserEmail,
+    /// Janela, em dias, de chamados buscados na sincronização.
+    ///
+    /// Existe como configuração e não como constante porque o valor certo
+    /// depende do volume da instalação: `GET /api/tickets` não tem filtro de
+    /// status padrão nem `LIMIT`, então sem janela a resposta traz todo
+    /// chamado já atribuído ao usuário.
+    MastersysTicketWindowDays,
+    /// Intervalo do polling de sincronização, em segundos.
+    MastersysPollSeconds,
+    /// Lembretes padrão (JSON de minutos) que a sincronização AUTOMÁTICA
+    /// aplica a itens recém-importados.
+    ///
+    /// Existe porque o comando manual recebe os lembretes da UI, e o timer não
+    /// tem UI. Sem isto, o mesmo item nasceria com lembrete quando importado
+    /// pelo botão e sem lembrete quando importado pelo timer.
+    MastersysDefaultReminders,
 }
 
 impl SettingKey {
@@ -30,6 +46,9 @@ impl SettingKey {
             SettingKey::MastersysUserId => "mastersys.user_id",
             SettingKey::MastersysUserName => "mastersys.user_name",
             SettingKey::MastersysUserEmail => "mastersys.user_email",
+            SettingKey::MastersysTicketWindowDays => "mastersys.ticket_window_days",
+            SettingKey::MastersysPollSeconds => "mastersys.poll_seconds",
+            SettingKey::MastersysDefaultReminders => "mastersys.default_reminders",
         }
     }
 }

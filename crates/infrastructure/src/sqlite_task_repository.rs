@@ -45,6 +45,7 @@ struct TaskRow {
     external_client: Option<String>,
     external_ticket: Option<String>,
     external_status: Option<String>,
+    external_status_parked: i64,
     created_at: String,
     updated_at: String,
 }
@@ -97,6 +98,7 @@ fn row_to_task(row: TaskRow) -> DomainResult<Task> {
         row.external_client,
         row.external_ticket,
         row.external_status,
+        row.external_status_parked != 0,
     )?;
 
     Ok(Task::reconstitute(
@@ -123,6 +125,7 @@ fn row_to_external(
     client: Option<String>,
     ticket: Option<String>,
     status: Option<String>,
+    status_parked: bool,
 ) -> DomainResult<Option<ExternalRef>> {
     match (system, kind, external_id) {
         (None, None, None) => Ok(None),
@@ -133,7 +136,8 @@ fn row_to_external(
                 .map_err(|_| DomainError::Persistence)?
                 .with_client(client)
                 .with_ticket(ticket)
-                .with_status_label(status);
+                .with_status_label(status)
+                .with_status_parked(status_parked);
             Ok(Some(reference))
         }
         _ => Err(DomainError::Persistence),
@@ -165,13 +169,15 @@ impl TaskRepository for SqliteTaskRepository {
                 reminder_thresholds, completed,
                 external_system, external_kind, external_id,
                 external_client, external_ticket, external_status,
+                external_status_parked,
                 created_at, updated_at
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5,
                 ?6, ?7,
                 ?8, ?9, ?10,
                 ?11, ?12, ?13,
-                ?14, ?15
+                ?14,
+                ?15, ?16
             )
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
@@ -186,6 +192,7 @@ impl TaskRepository for SqliteTaskRepository {
                 external_client = excluded.external_client,
                 external_ticket = excluded.external_ticket,
                 external_status = excluded.external_status,
+                external_status_parked = excluded.external_status_parked,
                 updated_at = excluded.updated_at
             "#,
         )
@@ -202,6 +209,11 @@ impl TaskRepository for SqliteTaskRepository {
         .bind(task.external.as_ref().and_then(|e| e.client.clone()))
         .bind(task.external.as_ref().and_then(|e| e.ticket.clone()))
         .bind(task.external.as_ref().and_then(|e| e.status_label.clone()))
+        .bind(
+            task.external
+                .as_ref()
+                .map_or(0i64, |e| if e.status_parked { 1 } else { 0 }),
+        )
         .bind(created_str)
         .bind(now_str)
         .execute(&self.pool)

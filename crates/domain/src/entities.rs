@@ -314,6 +314,7 @@ fn is_valid_hex_color(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::external::{ExternalKind, ExternalSystem};
 
     #[test]
     fn new_note_defaults() {
@@ -555,6 +556,52 @@ mod tests {
         assert!((next - expected).num_seconds().abs() < 2);
     }
 
+    /// O caso do `melhoria.png`: um chamado em pós-atendimento tinha prazo
+    /// vencido, era pintado como atrasado e ainda disparava lembrete. Item
+    /// parado na origem não tem urgência, então não agenda nada.
+    #[test]
+    fn parked_task_schedules_no_reminder_even_with_a_deadline() {
+        let mut t = Task::new("chamado em pós-atendimento").unwrap();
+        let in_2h = Utc::now() + chrono::Duration::try_hours(2).unwrap();
+        t.set_deadline(Some(in_2h));
+        t.set_reminder_thresholds(vec![ReminderThreshold::Minutes(15)])
+            .unwrap();
+
+        // Com o mesmo prazo e threshold, um item ATIVO agenda.
+        let active = ExternalRef::new(ExternalSystem::Mastersys, ExternalKind::Ticket, "ticket-1")
+            .unwrap()
+            .with_status_parked(false);
+        let t_active = t.clone().attach_external(Some(active));
+        assert!(
+            t_active.next_reminder_fire_at().is_some(),
+            "item ativo com prazo futuro tem de agendar"
+        );
+        assert!(!t_active.is_parked());
+
+        // Mudando SÓ a flag de parado, o lembrete desaparece.
+        let parked = ExternalRef::new(ExternalSystem::Mastersys, ExternalKind::Ticket, "ticket-1")
+            .unwrap()
+            .with_status_parked(true);
+        let t_parked = t.attach_external(Some(parked));
+        assert!(t_parked.is_parked());
+        assert!(
+            t_parked.next_reminder_fire_at().is_none(),
+            "pós-atendimento não pode gerar lembrete de atraso"
+        );
+    }
+
+    #[test]
+    fn local_task_is_never_parked() {
+        // `is_parked` só existe para origem externa; tarefa local não pode
+        // perder lembrete por causa dessa regra.
+        let mut t = Task::new("tarefa local").unwrap();
+        t.set_deadline(Some(Utc::now() + chrono::Duration::try_hours(1).unwrap()));
+        t.set_reminder_thresholds(vec![ReminderThreshold::Minutes(5)])
+            .unwrap();
+        assert!(!t.is_parked());
+        assert!(t.next_reminder_fire_at().is_some());
+    }
+
     #[test]
     fn task_reminder_thresholds_validation() {
         let mut t = Task::new("task").unwrap();
@@ -751,7 +798,7 @@ impl Task {
     ///
     /// Título, descrição, prioridade, prazo e conclusão pertencem à origem —
     /// são sobrescritos a cada sincronização. Tudo o que o usuário criou no
-    /// MasterDesk (anotações da tarefa, lembretes configurados localmente)
+    /// MasterNote (anotações da tarefa, lembretes configurados localmente)
     /// não é tocado aqui, senão um sync apagaria trabalho do usuário.
     pub fn apply_external_update(
         &mut self,
@@ -837,10 +884,26 @@ impl Task {
         }
     }
 
+    /// True quando o sistema de origem considera o item parado (em espera,
+    /// concluído ou cancelado). Sempre `false` para tarefa local.
+    ///
+    /// Ver [`ExternalRef::status_parked`] para o porquê e para quem preenche.
+    pub fn is_parked(&self) -> bool {
+        self.external.as_ref().is_some_and(|e| e.status_parked)
+    }
+
     /// Retorna o próximo horário de disparo de lembrete baseado nos thresholds.
     /// Para cada threshold, calcula `deadline - threshold` e retorna a primeira
     /// vez que ainda está no futuro. None se não há deadline ou todos já passaram.
+    ///
+    /// Item parado na origem também devolve `None`: avisar "faltam 15 minutos"
+    /// para um chamado que está em pós-atendimento é ruído, não lembrete. A
+    /// regra vive aqui, e não em quem agenda, para valer nos dois caminhos —
+    /// a sincronização e o agendamento avulso de `TaskService`.
     pub fn next_reminder_fire_at(&self) -> Option<DateTime<Utc>> {
+        if self.is_parked() {
+            return None;
+        }
         let dl = self.deadline?;
         let now = Utc::now();
         let mut candidates: Vec<DateTime<Utc>> = self
@@ -937,27 +1000,75 @@ impl User {
 }
 
 /// Valida username: 3-32 caracteres alfanuméricos (a-z, A-Z, 0-9, e _).
+/// Valida um nome de usuário local.
+///
+/// ## O que passou a ser aceito em 2026-09-03
+///
+/// A regra anterior era `is_ascii_alphanumeric() || '_'`, que recusava
+/// **espaço, acento, hífen e ponto**. Na prática isso rejeitava o nome de
+/// quase todo mundo — "Gabriel Ferreira", "João", "ana.paula", "maria-clara" —
+/// e a mensagem de erro dizia apenas "may only contain letters, digits and
+/// underscore", em inglês, no meio de um app em português.
+///
+/// Agora o critério é o que de fato importa para um nome que só identifica uma
+/// conta **local**: ter conteúdo visível e não conter caractere de controle.
+/// Letra acentuada é `char::is_alphabetic`, então entra naturalmente.
+///
+/// ## O que continua recusado, e por quê
+///
+/// - **Pontuação fora do conjunto de nomes.** Aceitos: letra (com acento),
+///   dígito, espaço, `_`, `-`, `.` e apóstrofo — o suficiente para
+///   "ana.paula", "maria-clara" e "D'Ávila". `alice!` continua recusado: não
+///   foi pedido, e recusar mantém a política que o teste existente já
+///   registrava.
+/// - **Espaço no início ou fim**: aceito na entrada e removido, porque é erro
+///   de digitação comum e invisível na tela — mas guardar " ana" e "ana " como
+///   contas diferentes seria uma armadilha.
+/// - **Espaços internos múltiplos ou não convencionais**: colapsados, para
+///   "ana  paula" e "ana paula" não virarem duas contas.
+///
+/// O comprimento passou a ser medido em **caracteres**, não bytes: com `len()`
+/// um nome de 3 letras acentuadas ocupava 6 bytes e passava, enquanto o limite
+/// de 32 cortava um nome de 20 letras acentuadas.
 pub fn validate_username(username: &str) -> DomainResult<()> {
-    let trimmed = username.trim();
-    if trimmed.len() < 3 {
+    let normalized = normalize_username(username);
+    let count = normalized.chars().count();
+    if count < 3 {
         return Err(DomainError::Validation(
-            "username must be at least 3 characters".into(),
+            "o nome de usuário precisa de ao menos 3 caracteres".into(),
         ));
     }
-    if trimmed.len() > 32 {
+    if count > 32 {
         return Err(DomainError::Validation(
-            "username must be at most 32 characters".into(),
+            "o nome de usuário pode ter no máximo 32 caracteres".into(),
         ));
     }
-    if !trimmed
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
-        return Err(DomainError::Validation(
-            "username may only contain letters, digits and underscore".into(),
-        ));
+    if let Some(bad) = normalized.chars().find(|c| !is_username_char(*c)) {
+        // Mostra QUAL caractere ofendeu. A mensagem antiga listava o que era
+        // permitido e deixava o usuário procurando na própria digitação.
+        return Err(DomainError::Validation(format!(
+            "o caractere '{bad}' não pode ser usado no nome de usuário"
+        )));
     }
     Ok(())
+}
+
+/// Caracteres aceitos num nome de usuário local.
+///
+/// Letra cobre acentuada via `is_alphabetic`. A pontuação é a que aparece em
+/// nome de pessoa — nada além, para não virar campo livre.
+fn is_username_char(c: char) -> bool {
+    c.is_alphanumeric() || matches!(c, ' ' | '_' | '-' | '.' | '\'')
+}
+
+/// Forma canônica de um nome de usuário: sem espaço nas pontas e com espaços
+/// internos colapsados em um só.
+///
+/// Precisa ser aplicada tanto ao cadastrar quanto ao logar, senão quem se
+/// cadastrou como "ana  paula" (dois espaços) não conseguiria entrar digitando
+/// "ana paula".
+pub fn normalize_username(username: &str) -> String {
+    username.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Valida o tamanho mínimo da senha antes do hashing (a verificação de força
@@ -990,13 +1101,63 @@ mod user_tests {
 
     #[test]
     fn username_validation() {
-        assert!(User::new("ab", "x").is_err()); // too short
-        assert!(User::new("", "x").is_err()); // empty
-        assert!(User::new("alice!", "x").is_err()); // invalid char
+        assert!(User::new("ab", "x").is_err()); // curto
+        assert!(User::new("", "x").is_err()); // vazio
+        assert!(User::new("alice!", "x").is_err()); // pontuação fora do conjunto
         let long = "a".repeat(33);
-        assert!(User::new(long, "x").is_err()); // too long
-        assert!(User::new("alice_1", "x").is_ok()); // underscore allowed
-        assert!(User::new("Álvaro", "x").is_err()); // non-ascii not allowed
+        assert!(User::new(long, "x").is_err()); // longo
+        assert!(User::new("alice_1", "x").is_ok());
+    }
+
+    /// A regra antiga era `is_ascii_alphanumeric() || '_'`, que recusava o nome
+    /// de quase todo mundo. Estes casos são os que o DEV relatou em 2026-09-03.
+    #[test]
+    fn username_accepts_real_people_names() {
+        for name in [
+            "Gabriel Ferreira", // espaço — o caso relatado
+            "João",             // acento
+            "Álvaro",           // acento inicial (antes recusado)
+            "ana.paula",
+            "maria-clara",
+            "D'Ávila",
+            "José Antônio da Silva",
+        ] {
+            assert!(
+                User::new(name, "x").is_ok(),
+                "{name} é nome de gente e tem de ser aceito"
+            );
+        }
+    }
+
+    #[test]
+    fn username_is_normalized_on_the_way_in() {
+        // Espaço nas pontas e espaço interno duplicado não podem virar contas
+        // diferentes de "ana paula".
+        assert_eq!(normalize_username("  ana  paula  "), "ana paula");
+        assert_eq!(normalize_username("ana\tpaula"), "ana paula");
+        assert_eq!(normalize_username("ana paula"), "ana paula");
+        // Só espaços não é nome.
+        assert!(User::new("   ", "x").is_err());
+    }
+
+    #[test]
+    fn username_length_is_counted_in_characters_not_bytes() {
+        // "ção" tem 3 caracteres e 5 bytes. Com `len()` em bytes, um nome de 3
+        // letras acentuadas passava e um de 20 era cortado.
+        assert!(User::new("ção", "x").is_ok());
+        let twenty_accented = "á".repeat(20);
+        assert!(User::new(twenty_accented, "x").is_ok());
+        let thirty_three_accented = "á".repeat(33);
+        assert!(User::new(thirty_three_accented, "x").is_err());
+    }
+
+    #[test]
+    fn username_error_says_which_character_offended() {
+        let err = User::new("alice!", "x").unwrap_err();
+        assert!(
+            err.to_string().contains('!'),
+            "a mensagem tem de apontar o caractere, não listar os permitidos: {err}"
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! Sincronização com o sistema de suporte (ADR-006).
 //!
-//! O MasterDesk **espelha** os itens atribuídos ao usuário: puxa e reconcilia,
+//! O MasterNote **espelha** os itens atribuídos ao usuário: puxa e reconcilia,
 //! nunca escreve de volta. O provider concreto entra por injeção
 //! (`SupportSystemProvider`), então esta camada não sabe se a origem é o
 //! Mastersys, um mock de teste ou uma integração futura.
@@ -369,7 +369,7 @@ mod tests {
             !*self.signed_out.lock().unwrap()
         }
         async fn authenticate(&self, _i: &str, _p: &str) -> DomainResult<SupportIdentity> {
-            Err(DomainError::Unauthorized)
+            Err(DomainError::unauthorized("sessão inválida"))
         }
         async fn current_identity(&self) -> DomainResult<Option<SupportIdentity>> {
             Ok(None)

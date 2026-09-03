@@ -71,14 +71,6 @@ pub trait NotificationService: Send + Sync {
     async fn snooze(&self, task_id: TaskId, minutes: u32) -> DomainResult<()>;
 }
 
-/// Controle de janela (posição, always-on-top, opacidade). Implementação real
-/// depende da API do Tauri e é OS-specific (ver ADR-002, Fase 2).
-pub trait WindowService: Send + Sync {
-    fn set_always_on_top(&self, note_id: NoteId, enabled: bool) -> DomainResult<()>;
-    fn set_opacity(&self, note_id: NoteId, opacity: f32) -> DomainResult<()>;
-    fn set_position(&self, note_id: NoteId, x: f64, y: f64) -> DomainResult<()>;
-}
-
 /// Autenticação local (Fase 4) — isolada do Mastersys. O mecanismo externo de
 /// autenticação (Mastersys) entra na Fase 5 (ADR-006); este port permanece como
 /// contrato genérico e a implementação local é trocável.
@@ -111,10 +103,10 @@ pub trait AuthenticationProvider: Send + Sync {
 
 /// Integração com sistema de suporte (Mastersys ou futuro).
 ///
-/// O contrato abaixo é deliberadamente **somente leitura**: o MasterDesk puxa
+/// O contrato abaixo é deliberadamente **somente leitura**: o MasterNote puxa
 /// os itens atribuídos ao usuário e não escreve nada de volta. Fechar chamado,
 /// comentar ou reatribuir continuam sendo feitos no sistema de origem — isso
-/// mantém o MasterDesk fora do caminho crítico do suporte e evita que um bug
+/// mantém o MasterNote fora do caminho crítico do suporte e evita que um bug
 /// local altere registros de atendimento (seção 12/18 do CLAUDE.md).
 ///
 /// A implementação concreta (`MastersysProvider`) vive em `infrastructure` e é

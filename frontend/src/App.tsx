@@ -3,66 +3,98 @@ import { NotesBoard } from "./components/NotesBoard";
 import { TasksBoard } from "./components/TasksBoard";
 import { AuthPanel } from "./components/AuthPanel";
 import { NoteCard } from "./components/NoteCard";
+import { TaskWindowApp } from "./components/TaskWindowApp";
 import { ThemeToggle } from "./components/ThemeToggle";
 import type { AuthPayload, Note } from "./types";
 import * as api from "./api";
 
 type Tab = "notes" | "tasks";
 
-export default function App() {
-  const [noteParam, setNoteParam] = useState<string | null>(null);
+/**
+ * Espera antes de gravar a geometria de um pop-out, em ms.
+ *
+ * Curto o bastante para sobreviver a um fechamento logo após arrastar, e longo
+ * o bastante para um arrasto inteiro virar uma escrita só. O mesmo valor está
+ * em `TaskWindowApp`.
+ */
+const GEOMETRY_DEBOUNCE_MS = 250;
 
-  useEffect(() => {
-    // Suporta search (?note=), hash (#note= / #/index.html#note=), tauri:// e __NOTE_ID__ via initialization_script
-    const href = window.location.href;
-    let n: string | null = null;
-    // Fallback via window.__NOTE_ID__ (injetado pelo Rust se URL falhar)
-    const w = window as unknown as { __NOTE_ID__?: string };
-    if (w.__NOTE_ID__ && w.__NOTE_ID__.trim()) {
-      n = w.__NOTE_ID__.trim();
-    } else {
-      try {
-        const url = new URL(href);
-        n = url.searchParams.get("note");
-        if (!n && url.hash.includes("note=")) {
-          // hash pode ser "#note=id" ou "#/index.html#note=id" ou "#?note=id"
-          const hash = url.hash;
-          // pega tudo após último "#"
-          const lastHash = hash.split("#").pop() ?? "";
-          // tenta como searchParams (note=id) ou como path com ?
-          if (lastHash.includes("note=")) {
-            const hashParams = new URLSearchParams(lastHash.replace(/^\/?/, ""));
-            n = hashParams.get("note");
-          }
-          if (!n) {
-            // fallback: regex simples
-            const m = href.match(/note=([a-f0-9\-]{36})/i);
-            if (m) n = m[1];
-          }
-        }
-        // último fallback: regex no href inteiro
-        if (!n) {
-          const m = href.match(/note=([a-f0-9\-]{36})/i);
-          if (m) n = m[1];
-        }
-      } catch {
-        const params = new URLSearchParams(window.location.search);
-        n = params.get("note");
-        if (!n) {
-          const m = href.match(/note=([a-f0-9\-]{36})/i);
-          if (m) n = m[1];
-        }
-      }
-    }
-    console.log("App noteParam href:", href, "parsed:", n, "__NOTE_ID__:", w.__NOTE_ID__);
-    setNoteParam(n && n.trim() ? n.trim() : null);
-  }, []);
+/** Alvo de uma janela destacada, quando esta janela for uma. */
+type PopoutTarget = { kind: "note"; id: string } | { kind: "task"; id: string };
 
-  // Modo janela de nota: URL ?note=<id> → renderiza apenas a nota isolada.
-  if (noteParam !== null) {
-    return <NoteWindowApp noteId={noteParam} />;
+/**
+ * Descobre se esta janela é um pop-out e de que item.
+ *
+ * Três canais redundantes, em ordem de confiabilidade:
+ *
+ * 1. O global injetado pela `initialization_script` do Rust — o único que não
+ *    depende de como a URL sobreviveu.
+ * 2. Query string (`?note=`), para quando a janela é aberta por link.
+ * 3. Hash (`#note=`), que é o que o `WebviewUrl::App` realmente produz, com
+ *    variações (`#note=id`, `#/index.html#note=id`, `#?note=id`) dependendo de
+ *    dev vs. empacotado.
+ *
+ * O regex no href inteiro fecha a lista como último recurso. É redundância
+ * deliberada: pop-out que não sabe o que renderizar é uma janela inútil que o
+ * usuário não consegue fechar.
+ */
+function detectPopoutTarget(): PopoutTarget | null {
+  const href = window.location.href;
+  const w = window as unknown as { __NOTE_ID__?: string; __TASK_ID__?: string };
+
+  const injected: Array<[PopoutTarget["kind"], string | undefined]> = [
+    ["note", w.__NOTE_ID__],
+    ["task", w.__TASK_ID__],
+  ];
+  for (const [kind, value] of injected) {
+    if (value && value.trim()) return { kind, id: value.trim() };
   }
 
+  for (const kind of ["note", "task"] as const) {
+    const id = idFromUrl(href, kind);
+    if (id) return { kind, id };
+  }
+  return null;
+}
+
+/** Procura `<param>=<uuid>` na query, no hash e, por fim, no href inteiro. */
+function idFromUrl(href: string, param: "note" | "task"): string | null {
+  const uuid = new RegExp(`${param}=([a-f0-9-]{36})`, "i");
+
+  try {
+    const url = new URL(href);
+
+    const fromQuery = url.searchParams.get(param);
+    if (fromQuery?.trim()) return fromQuery.trim();
+
+    if (url.hash.includes(`${param}=`)) {
+      // Pega o trecho após o último "#" e tenta lê-lo como query string.
+      const lastHash = url.hash.split("#").pop() ?? "";
+      const fromHash = new URLSearchParams(lastHash.replace(/^\/?/, "")).get(param);
+      if (fromHash?.trim()) return fromHash.trim();
+    }
+  } catch {
+    // href malformado: o regex abaixo ainda pode salvar.
+  }
+
+  const m = href.match(uuid);
+  return m ? m[1] : null;
+}
+
+export default function App() {
+  const [popout, setPopout] = useState<PopoutTarget | null>(null);
+  const [resolved, setResolved] = useState(false);
+
+  useEffect(() => {
+    setPopout(detectPopoutTarget());
+    // Sem este flag, o primeiro render (antes do efeito) mostraria o app
+    // principal por um instante dentro da janela de pop-out.
+    setResolved(true);
+  }, []);
+
+  if (!resolved) return null;
+  if (popout?.kind === "note") return <NoteWindowApp noteId={popout.id} />;
+  if (popout?.kind === "task") return <TaskWindowApp taskId={popout.id} />;
   return <MainApp />;
 }
 
@@ -146,15 +178,34 @@ function NoteWindowApp({ noteId }: { noteId: string }) {
       }
     };
 
+    // Debounce: `onMoved` dispara a cada pixel do arrasto, então arrastar a
+    // nota pela tela emitia centenas de escritas no SQLite. O que interessa é
+    // onde ela parou.
+    //
+    // Este caminho só passou a ser exercitado em 2026-09-03: até a correção da
+    // capability (`core:window:allow-start-dragging`), arrastar a janela de
+    // nota simplesmente não funcionava, e o listener nunca era chamado de
+    // verdade.
+    let moveTimer: ReturnType<typeof setTimeout> | undefined;
+    let sizeTimer: ReturnType<typeof setTimeout> | undefined;
+
     (async () => {
       const win = (await import("@tauri-apps/api/window")).getCurrentWindow();
-      const unMove = await win.onMoved((e) => syncPosition(e.payload));
-      const unResize = await win.onResized((e) => syncSize(e.payload));
+      const unMove = await win.onMoved((e) => {
+        clearTimeout(moveTimer);
+        moveTimer = setTimeout(() => syncPosition(e.payload), GEOMETRY_DEBOUNCE_MS);
+      });
+      const unResize = await win.onResized((e) => {
+        clearTimeout(sizeTimer);
+        sizeTimer = setTimeout(() => syncSize(e.payload), GEOMETRY_DEBOUNCE_MS);
+      });
       if (!disposed) unlistenFns = [unMove, unResize];
     })();
 
     return () => {
       disposed = true;
+      clearTimeout(moveTimer);
+      clearTimeout(sizeTimer);
       unlistenFns.forEach((fn) => fn());
     };
   }, [note]);
@@ -345,11 +396,11 @@ function MainApp() {
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", background:"var(--surface)" }}>
-      <nav className="md-nav" role="tablist" aria-label="Seções do MasterDesk">
-        <div className="md-brand" aria-label="MasterDesk">
+      <nav className="md-nav" role="tablist" aria-label="Seções do MasterNote">
+        <div className="md-brand" aria-label="MasterNote">
           <div className="md-brand-mark" aria-hidden>MD</div>
           <div style={{ display:"flex", flexDirection:"column", lineHeight:1 }}>
-            <span style={{ fontSize:14, letterSpacing:"-.02em" }}>MasterDesk</span>
+            <span style={{ fontSize:14, letterSpacing:"-.02em" }}>MasterNote</span>
             <small>notas • tarefas • foco</small>
           </div>
         </div>

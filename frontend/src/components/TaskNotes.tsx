@@ -122,20 +122,35 @@ export function TaskNotes({ taskId, initialCount, onCountChange }: Props) {
     }
   };
 
-  // Ctrl/Cmd+Enter salva: quem registra atendimento digita muito e não quer
-  // ir ao mouse a cada entrada. Enter puro insere linha, porque uma anotação
-  // frequentemente tem mais de uma.
+  // Enter confirma; Shift+Enter insere linha.
+  //
+  // A anotação de atendimento é quase sempre de uma linha e escrita em
+  // sequência, então o caminho rápido tem que ser a tecla que a mão já está
+  // em cima. Ctrl/Cmd+Enter continua valendo por hábito de quem já usava.
+  // `isComposing` é checado porque em IME (acentuação por teclado morto,
+  // teclados asiáticos) o Enter fecha a composição e não deve enviar.
+  const submitsOnEnter = (e: React.KeyboardEvent<HTMLTextAreaElement>) =>
+    e.key === "Enter" && !e.shiftKey && !e.altKey && !e.nativeEvent.isComposing;
+
   const composeKeys = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    if (submitsOnEnter(e)) {
       e.preventDefault();
       void handleAdd();
+      return;
+    }
+    // Escape limpa o rascunho — sai de uma anotação começada por engano sem
+    // ter que selecionar e apagar.
+    if (e.key === "Escape" && draft) {
+      e.preventDefault();
+      setDraft("");
     }
   };
 
   const editKeys = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    if (submitsOnEnter(e)) {
       e.preventDefault();
       void handleSaveEdit();
+      return;
     }
     if (e.key === "Escape") {
       e.preventDefault();
@@ -203,6 +218,7 @@ export function TaskNotes({ taskId, initialCount, onCountChange }: Props) {
                         rows={2}
                         autoFocus
                         aria-label="Editar anotação"
+                        title="Enter salva · Shift+Enter nova linha · Esc cancela"
                       />
                       <div className="md-btn-row" style={{ marginTop: 6 }}>
                         <button className="md-btn md-btn--primary" onClick={() => void handleSaveEdit()}>
@@ -264,7 +280,7 @@ export function TaskNotes({ taskId, initialCount, onCountChange }: Props) {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={composeKeys}
-          placeholder="Registrar uma anotação…"
+          placeholder="Registrar uma anotação… (Enter salva)"
           rows={1}
           aria-label="Nova anotação"
         />
@@ -272,7 +288,7 @@ export function TaskNotes({ taskId, initialCount, onCountChange }: Props) {
           className="md-btn md-btn--primary"
           onClick={() => void handleAdd()}
           disabled={!draft.trim() || saving}
-          title="Adicionar anotação (Ctrl+Enter)"
+          title="Adicionar anotação (Enter · Shift+Enter para nova linha)"
         >
           {saving ? "Salvando…" : "Adicionar"}
         </button>

@@ -11,6 +11,9 @@ import type {
   LoginPayload,
   TaskNote,
   MastersysStatus,
+  MastersysTicketStatus,
+  ExternalWorkItem,
+  LastSync,
   SupportIdentity,
   SyncReport,
 } from "./types";
@@ -104,6 +107,17 @@ export async function setNoteWindowSize(
   h: number,
 ): Promise<void> {
   return invoke<void>("set_note_window_size", { id, w, h });
+}
+
+/**
+ * Ids das notas com janela aberta agora, direto do gerenciador de janelas.
+ *
+ * Preferir isto a rastrear o conjunto em estado de componente: estado local se
+ * perde na troca de aba, e aí a nota reaparecia no quadro com a janela ainda
+ * aberta — duas superfícies editando a mesma nota.
+ */
+export async function openNoteWindowIds(): Promise<string[]> {
+  return invoke<string[]>("open_note_window_ids");
 }
 
 export async function isNoteWindowOpen(id: string): Promise<boolean> {
@@ -206,12 +220,143 @@ export async function deleteTaskNote(id: string): Promise<void> {
 // Integração Mastersys (ADR-006) — somente leitura
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Pop-out de tarefa
+// ---------------------------------------------------------------------------
+
+export async function openTaskWindow(id: string): Promise<void> {
+  return invoke<void>("open_task_window", { id });
+}
+
+export async function closeTaskWindow(id: string): Promise<void> {
+  return invoke<void>("close_task_window", { id });
+}
+
+/**
+ * Ids das tarefas com janela aberta, direto do gerenciador de janelas.
+ *
+ * Serve também para achar janela órfã: um id daqui sem tarefa correspondente é
+ * um espelho que o `retire_mirror` apagou e cuja janela ficou para trás.
+ */
+export async function openTaskWindowIds(): Promise<string[]> {
+  return invoke<string[]>("open_task_window_ids");
+}
+
+/**
+ * Grava a posição da janela destacada. **Não move a janela.**
+ *
+ * O nome importa: a versão anterior (`setTaskWindowPosition`) também aplicava a
+ * posição, e como quem chama é o listener de `onMoved`, isso virava um laço —
+ * gravar, mover, disparar `onMoved`, gravar… A janela agitava freneticamente.
+ */
+export async function saveTaskWindowPosition(
+  id: string,
+  x: number,
+  y: number,
+): Promise<void> {
+  return invoke<void>("save_task_window_position", { id, x, y });
+}
+
+/** Grava o tamanho da janela destacada. **Não redimensiona a janela.** */
+export async function saveTaskWindowSize(
+  id: string,
+  w: number,
+  h: number,
+): Promise<void> {
+  return invoke<void>("save_task_window_size", { id, w, h });
+}
+
+export async function setTaskWindowAlwaysOnTop(
+  id: string,
+  enabled: boolean,
+): Promise<void> {
+  return invoke<void>("set_task_window_always_on_top", { id, enabled });
+}
+
+// ---------------------------------------------------------------------------
+// Sincronização automática
+// ---------------------------------------------------------------------------
+
+/** Evento emitido pelo Rust após uma sincronização automática que mudou algo. */
+export const MASTERSYS_SYNCED_EVENT = "masterdesk://mastersys-synced";
+
+export async function mastersysPollInterval(): Promise<number> {
+  return invoke<number>("mastersys_poll_interval");
+}
+
+export async function mastersysSetPollInterval(seconds: number): Promise<void> {
+  return invoke<void>("mastersys_set_poll_interval", { seconds });
+}
+
+/**
+ * O canal de tempo real está conectado?
+ *
+ * Distingue "acompanha em segundos" de "acompanha em minutos". Vale mostrar:
+ * sem isso o usuário não tem como saber por que uma mudança levou 5 minutos
+ * para aparecer no quadro.
+ */
+export async function mastersysRealtimeConnected(): Promise<boolean> {
+  return invoke<boolean>("mastersys_realtime_connected");
+}
+
+/**
+ * O que aconteceu na última sincronização automática.
+ *
+ * `null` = nenhuma rodou ainda nesta execução. Responde "está demorando ou nem
+ * acontecendo?" sem precisar de log.
+ */
+export async function mastersysLastSync(): Promise<LastSync | null> {
+  return invoke<LastSync | null>("mastersys_last_sync");
+}
+
+/** Pede uma sincronização agora, sem esperar o timer. */
+export async function mastersysSyncNow(): Promise<void> {
+  return invoke<void>("mastersys_sync_now");
+}
+
+/**
+ * Escuta sincronizações automáticas. Devolve a função de cancelamento.
+ *
+ * O Rust só emite quando algo mudou de fato — emitir a cada ciclo faria o
+ * quadro recarregar de 5 em 5 minutos sem motivo, perdendo scroll e seleção.
+ */
+export async function onMastersysSynced(
+  handler: (report: SyncReport) => void,
+): Promise<() => void> {
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<SyncReport>(MASTERSYS_SYNCED_EVENT, (e) => handler(e.payload));
+}
+
 export async function mastersysStatus(): Promise<MastersysStatus> {
   return invoke<MastersysStatus>("mastersys_status");
 }
 
 export async function mastersysSetEndpoint(endpoint: string): Promise<void> {
   return invoke<void>("mastersys_set_endpoint", { endpoint });
+}
+
+export async function mastersysSetTicketWindow(days: number): Promise<void> {
+  return invoke<void>("mastersys_set_ticket_window", { days });
+}
+
+/**
+ * Catálogo de status espelhado. Só lê o banco local — não toca a rede.
+ * Lista vazia é resposta legítima: nunca sincronizou, ou o endpoint falhou.
+ */
+export async function mastersysStatusCatalog(): Promise<MastersysTicketStatus[]> {
+  return invoke<MastersysTicketStatus[]>("mastersys_status_catalog");
+}
+
+/**
+ * Busca ao vivo no acervo de chamados do Mastersys (mínimo 3 caracteres).
+ *
+ * O resultado é **consulta**: um chamado que não esteja atribuído a você não
+ * pode virar espelho no quadro, porque a sincronização seguinte o apagaria.
+ */
+export async function mastersysSearchTickets(
+  query: string,
+): Promise<ExternalWorkItem[]> {
+  return invoke<ExternalWorkItem[]>("mastersys_search_tickets", { query });
 }
 
 export async function mastersysConnect(

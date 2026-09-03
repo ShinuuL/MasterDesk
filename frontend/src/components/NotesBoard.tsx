@@ -26,22 +26,21 @@ export function NotesBoard() {
       setError(null);
       const data = showArchived ? await api.listArchivedNotes() : await api.listActiveNotes();
       setNotes(data);
-      // Reconcilia: remove do `poppedOut` janelas que já foram fechadas
-      // (ex.: fechadas pelo botão ✕ na própria janela ou pelo OS).
-      if (poppedOutRef.current.size > 0) {
-        const stillOpen: string[] = [];
-        for (const id of poppedOutRef.current) {
-          try {
-            if (await api.isNoteWindowOpen(id)) stillOpen.push(id);
-          } catch {
-            // se a checagem falhar, mantém o id (conservador)
-            stillOpen.push(id);
-          }
-        }
-        const next = new Set(stillOpen);
-        if (next.size !== poppedOutRef.current.size) {
-          setPoppedOutBoth(next);
-        }
+
+      // Pergunta ao gerenciador de janelas quais notas estão destacadas, em vez
+      // de confiar no que este componente lembra.
+      //
+      // O estado local se perdia na troca de aba (o `App` desmonta o board
+      // quando você vai para Tarefas), e a nota voltava ao quadro com a janela
+      // dela ainda aberta — duas superfícies editando a mesma nota.
+      //
+      // Uma chamada em vez de uma por nota, e em falha o conjunto fica VAZIO,
+      // não preservado: em dúvida, mostrar a nota. Nota duplicada no quadro é
+      // recuperável; nota invisível nos dois lugares não era.
+      try {
+        setPoppedOutBoth(new Set(await api.openNoteWindowIds()));
+      } catch {
+        setPoppedOutBoth(new Set());
       }
     } catch (e) {
       setError(String(e));

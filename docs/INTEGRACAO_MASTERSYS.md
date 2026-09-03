@@ -15,7 +15,8 @@ Mastersys Suporte                     MasterDesk (Tauri + SQLite)
 POST /api/auth/login      ◄────────── conectar (usuário + senha)
 POST /api/auth/refresh    ◄────────── renovação automática do token
 GET  /api/tasks/users/:id ◄────────── sincronizar
-GET  /api/tickets?assignedTo=:id ◄───
+GET  /api/tickets/paginated      ◄───  (janela de 90 dias, configurável)
+     ?assignedTo=:id&createdAtStart=
                                        │
                                        ├─ tarefas espelhadas (somente leitura)
                                        └─ anotações locais (só suas)

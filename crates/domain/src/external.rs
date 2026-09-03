@@ -84,6 +84,18 @@ pub struct ExternalRef {
     /// Mantido como texto porque o Mastersys permite status customizados —
     /// mapear para um enum fechado inventaria valores (Regra 1).
     pub status_label: Option<String>,
+    /// A origem considera este item **parado**: em espera, concluído ou
+    /// cancelado, em vez de em andamento.
+    ///
+    /// Existe porque prazo de item parado não significa urgência. Um chamado em
+    /// pós-atendimento com prazo vencido não está atrasado — está aguardando. Sem
+    /// esta distinção o quadro o marcava como atrasado e o lembrete disparava.
+    ///
+    /// Genérico de propósito: quem traduz status da origem para esta flag é o
+    /// adapter, não o domínio (CLAUDE §4). Um provedor que não saiba distinguir
+    /// deixa `false`, e o comportamento é o de antes.
+    #[serde(default)]
+    pub status_parked: bool,
 }
 
 impl ExternalRef {
@@ -110,6 +122,7 @@ impl ExternalRef {
             client: None,
             ticket: None,
             status_label: None,
+            status_parked: false,
         })
     }
 
@@ -128,6 +141,11 @@ impl ExternalRef {
         self
     }
 
+    pub fn with_status_parked(mut self, parked: bool) -> Self {
+        self.status_parked = parked;
+        self
+    }
+
     /// Chave estável de deduplicação entre sincronizações.
     pub fn dedup_key(&self) -> String {
         format!("{}:{}", self.system.as_str(), self.external_id)
@@ -137,7 +155,7 @@ impl ExternalRef {
 /// Item de trabalho normalizado que veio de um sistema de suporte.
 ///
 /// É o formato que `SupportSystemProvider` devolve: já traduzido para o
-/// vocabulário do MasterDesk (`Priority`, `DateTime<Utc>`, `completed`), de
+/// vocabulário do MasterNote (`Priority`, `DateTime<Utc>`, `completed`), de
 /// modo que a camada de aplicação nunca veja JSON nem status crus do
 /// Mastersys. A tradução acontece no adapter, que é o único lugar que conhece
 /// o contrato real da API.
@@ -153,7 +171,7 @@ pub struct ExternalWorkItem {
     /// True quando o item está finalizado/cancelado na origem.
     pub completed: bool,
     /// True quando o item deixou de pertencer ao usuário na origem e deve
-    /// sair do MasterDesk.
+    /// sair do MasterNote.
     pub removed: bool,
 }
 

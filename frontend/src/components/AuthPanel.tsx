@@ -65,7 +65,7 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
             MD
           </div>
           <div>
-            <div style={{ fontWeight: 700, letterSpacing: "-.02em", fontSize: 15 }}>MasterDesk</div>
+            <div style={{ fontWeight: 700, letterSpacing: "-.02em", fontSize: 15 }}>MasterNote</div>
             <div style={{ fontSize: 11, opacity: 0.7, textTransform: "uppercase", letterSpacing: ".06em" }}>notas • tarefas • foco</div>
           </div>
         </div>

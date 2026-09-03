@@ -2,7 +2,7 @@
 //!
 //! CLAUDE §11/13/18: "Never store plaintext passwords / Never hard-code tokens
 //! / Use secure credential storage where appropriate". O banco SQLite do
-//! MasterDesk fica no diretório do usuário sem criptografia, então token de
+//! MasterNote fica no diretório do usuário sem criptografia, então token de
 //! sessão **não** pode morar lá.
 //!
 //! Backends por SO (via `keyring` 3.x):
@@ -19,7 +19,7 @@ use thiserror::Error;
 
 /// Serviço registrado no cofre. Aparece como nome do item para o usuário no
 /// Credential Manager / Keychain, então é legível de propósito.
-const SERVICE: &str = "MasterDesk";
+const SERVICE: &str = "MasterNote";
 
 #[derive(Debug, Error)]
 pub enum SecretStoreError {
@@ -33,7 +33,7 @@ pub enum SecretStoreError {
 
 pub type SecretResult<T> = Result<T, SecretStoreError>;
 
-/// Chaves usadas pelo MasterDesk. Enum fechado para evitar chave digitada
+/// Chaves usadas pelo MasterNote. Enum fechado para evitar chave digitada
 /// errada em um lugar e certa em outro.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecretKey {
