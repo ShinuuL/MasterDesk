@@ -24,6 +24,13 @@ uuid = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "chrono", "uuid", "json"] }
 
+# Atualização automática (GitHub Releases). Só no desktop: o updater do Tauri 2
+# não tem implementação para Android/iOS, e listá-lo sem o `cfg` quebraria o
+# build mobile que o `mobile_entry_point` em `lib.rs` deixa em aberto.
+[target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+
 # Adicionados quando as respectivas fases começarem:
 # tauri-plugin-sql = { version = "2", features = ["sqlite"] }      # Fase 2 (ADR-003)
 # tauri-plugin-notification = "2"                                  # Fase 3 (ADR-004)

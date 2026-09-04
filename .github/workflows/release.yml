@@ -1,0 +1,67 @@
+# Publica o instalador do MasterNote e o `latest.json` que o updater consulta.
+#
+# Dispara ao empurrar uma tag `v*` (ex.: `v0.2.0`). A tag precisa bater com a
+# `version` do `src-tauri/tauri.conf.json` — o updater compara a versão do
+# manifesto com a compilada no binário, e uma tag adiantada faz o app se achar
+# desatualizado contra ele mesmo, mostrando o toast em looping.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # necessário para criar a release e subir os artefatos
+
+# ATENÇÃO: a `tauri-action` publica no repositório onde o workflow roda —
+# `ShinuuL/MasterDesk`. Se os instaladores tiverem de ir para o repo de releases
+# privado, falta um passo de `gh release upload` para lá, com um PAT em secret:
+# o `GITHUB_TOKEN` do Actions não alcança outro repositório. Ver
+# `docs/ATUALIZACAO.md`.
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Cacheia `target/` — sem isso cada release recompila o grafo inteiro
+      # (tauri, sqlx, reqwest) do zero, ~15 min por tag.
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - run: npm ci
+        working-directory: frontend
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Par de chaves do updater. A privada NÃO vive no repositório: é o
+          # conteúdo de `~/.masterdesk/masternote-updater.key`, colado no
+          # secret. Perder essa chave significa que nenhuma versão futura
+          # consegue atualizar as instalações existentes — elas teriam de ser
+          # reinstaladas à mão, com um pubkey novo.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: src-tauri
+          tagName: ${{ github.ref_name }}
+          releaseName: MasterNote ${{ github.ref_name }}
+          releaseBody: |
+            O texto desta seção aparece no toast de atualização dentro do app,
+            cortado em ~180 caracteres. Escreva a primeira frase pensando nisso.
+          # Sai como rascunho para o release ser revisado antes de chegar às
+          # máquinas da equipe: o updater só enxerga releases publicadas, então
+          # publicar é o gesto que dispara a atualização de todo mundo.
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true

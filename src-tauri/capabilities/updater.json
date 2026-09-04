@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "updater",
+  "description": "Permissions do toast de atualização. Só a janela `main` — o pop-out de nota/tarefa não mostra o toast, e dar a permissão a ele deixaria duas janelas checando e instalando a mesma atualização em paralelo. `process:allow-restart` é o que fecha o ciclo: sem ele o instalador roda mas o app não volta.",
+  "platforms": ["windows", "macOS", "linux"],
+  "windows": ["main"],
+  "permissions": [
+    "updater:default",
+    "process:allow-restart"
+  ]
+}

@@ -99,6 +99,21 @@ falta apenas ele chegar a quem for instalar.
 
 ## 📦 Distribuição para a equipe — o que avisar
 
+### Atualização automática (a partir de 2026-09-04)
+
+O app agora checa o GitHub Releases e mostra um toast "atualização disponível"
+com botão de instalar. Isso **não** dispensa a instalação manual descrita
+abaixo: o updater só alcança quem já tem uma versão com ele dentro, e as 0.1.0 e
+0.2.0 em campo não têm. A próxima instalação ainda é na mão; da seguinte em
+diante, o toast resolve.
+
+O endpoint já aponta para `ShinuuL/MasterDesk`. Falta o que depende do DEV: a
+chave privada como secret do GitHub, e o **gateway** — os instaladores ficam num
+repo de releases privado, e o updater não manda credencial, então um manifesto
+atrás de autenticação volta 404 e o toast nunca aparece. Para testar ponta a
+ponta antes do gateway, basta publicar uma release pública neste repo.
+Detalhes e o passo a passo de publicação em [ATUALIZACAO.md](ATUALIZACAO.md).
+
 ### Desinstalar o "MasterDesk" antes de instalar o "MasterNote"
 
 O `identifier` continua `com.masterdesk.app` (para não orfanar o banco), mas o

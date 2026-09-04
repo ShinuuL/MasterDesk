@@ -5,6 +5,7 @@ import { AuthPanel } from "./components/AuthPanel";
 import { NoteCard } from "./components/NoteCard";
 import { TaskWindowApp } from "./components/TaskWindowApp";
 import { ThemeToggle } from "./components/ThemeToggle";
+import { UpdateToast } from "./components/UpdateToast";
 import type { AuthPayload, Note } from "./types";
 import * as api from "./api";
 
@@ -406,8 +407,18 @@ function MainApp() {
     );
   }
 
+  // O toast aparece também na tela de login: quem está com uma versão velha
+  // costuma descobrir justamente ali, quando o login falha contra um Mastersys
+  // que já mudou. Não aparece nos pop-outs — as saídas antecipadas acima já
+  // trataram deles, e duas janelas instalando a mesma atualização seria pior
+  // que nenhuma.
   if (!authUser) {
-    return <AuthPanel onAuthenticated={(u) => setAuthUser(u)} />;
+    return (
+      <>
+        <AuthPanel onAuthenticated={(u) => setAuthUser(u)} />
+        <UpdateToast />
+      </>
+    );
   }
 
   return (
@@ -505,6 +516,8 @@ function MainApp() {
           </div>
         )}
       </div>
+
+      <UpdateToast />
     </div>
   );
 }

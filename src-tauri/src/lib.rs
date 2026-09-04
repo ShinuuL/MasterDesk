@@ -15,7 +15,20 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    // Atualização automática — o toast de "atualização disponível" no frontend
+    // fala com estes dois plugins: `updater` para checar/baixar/instalar e
+    // `process` para o `relaunch()` que reabre o app depois de instalar.
+    //
+    // O `cfg` acompanha o do `Cargo.toml`: no mobile as crates nem entram no
+    // grafo de dependências, então referenciá-las aqui sem guarda não compila.
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+    let builder = builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init());
+
+    builder
         .setup(|app| {
             // Inicializa SQLite em app_data_dir/masterdesk.db
             //
@@ -251,6 +264,7 @@ pub fn run() {
             commands::add_task_note,
             commands::list_task_notes,
             commands::count_task_notes,
+            commands::count_all_task_notes,
             commands::update_task_note,
             commands::set_task_note_done,
             commands::delete_task_note,
