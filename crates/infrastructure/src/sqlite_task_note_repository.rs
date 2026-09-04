@@ -120,6 +120,20 @@ impl TaskNoteRepository for SqliteTaskNoteRepository {
         Ok(count.max(0) as u32)
     }
 
+    async fn counts_by_task(&self) -> DomainResult<Vec<(TaskId, u32)>> {
+        let rows: Vec<(String, i64)> =
+            sqlx::query_as("SELECT task_id, COUNT(*) FROM task_notes GROUP BY task_id")
+                .fetch_all(&self.pool)
+                .await
+                .map_err(map_sqlx_err)?;
+        Ok(rows
+            .into_iter()
+            // Id ilegível é linha órfã de um schema anterior: ignorada em vez
+            // de derrubar o contador do quadro inteiro.
+            .filter_map(|(id, n)| TaskId::parse_str(&id).ok().map(|id| (id, n.max(0) as u32)))
+            .collect())
+    }
+
     async fn delete(&self, id: TaskNoteId) -> DomainResult<()> {
         sqlx::query("DELETE FROM task_notes WHERE id = ?1")
             .bind(id.to_string())

@@ -52,6 +52,15 @@ pub trait TaskNoteRepository: Send + Sync {
     /// Anotações de uma tarefa, mais antigas primeiro (linha do tempo).
     async fn list_by_task(&self, task_id: TaskId) -> DomainResult<Vec<TaskNote>>;
     async fn count_by_task(&self, task_id: TaskId) -> DomainResult<u32>;
+    /// Quantas anotações cada tarefa tem, numa consulta só.
+    ///
+    /// Só tarefas com pelo menos uma anotação aparecem — quem chama trata
+    /// ausência como zero.
+    ///
+    /// Existe porque o quadro mostra o contador em cada card: perguntar tarefa
+    /// por tarefa custava uma consulta (e uma travessia de IPC) por item, e o
+    /// quadro tem algumas centenas deles a cada recarga.
+    async fn counts_by_task(&self) -> DomainResult<Vec<(TaskId, u32)>>;
     async fn delete(&self, id: TaskNoteId) -> DomainResult<()>;
     /// Remove todas as anotações de uma tarefa (usado ao deletar a tarefa).
     async fn delete_by_task(&self, task_id: TaskId) -> DomainResult<()>;

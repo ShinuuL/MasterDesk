@@ -975,6 +975,32 @@ impl Task {
     /// são sobrescritos a cada sincronização. Tudo o que o usuário criou no
     /// MasterNote (anotações da tarefa, lembretes configurados localmente)
     /// não é tocado aqui, senão um sync apagaria trabalho do usuário.
+    /// O espelho já reflete exatamente este item da origem?
+    ///
+    /// Compara os campos que [`Task::apply_external_update`] escreve — e só
+    /// esses: lembretes e anotações são locais e não entram na conta.
+    ///
+    /// ## Por que isto existe
+    ///
+    /// `apply_external_update` sempre chama `touch()`, então a reconciliação
+    /// contava **toda** rodada de sincronização como "atualizou" para cada
+    /// espelho. Com algumas centenas de chamados na fila, `total_changes()`
+    /// nunca era zero e o `sync_scheduler` avisava a UI a cada ciclo — o que
+    /// recarregava o quadro inteiro sem que nada tivesse mudado. Somando as
+    /// salas globais do Mastersys (evento de qualquer usuário da empresa pede
+    /// sincronização), isso virava uma gravação de centenas de linhas e um
+    /// recarregamento de tela a cada 15 segundos.
+    ///
+    /// Comparar é barato; gravar, reagendar lembrete e recarregar a UI não são.
+    pub fn matches_external(&self, item: &crate::external::ExternalWorkItem) -> bool {
+        self.title == item.title.trim()
+            && self.description == item.description
+            && self.priority == item.priority
+            && self.deadline == item.deadline
+            && self.completed == item.completed
+            && self.external.as_ref() == Some(&item.reference)
+    }
+
     pub fn apply_external_update(
         &mut self,
         item: &crate::external::ExternalWorkItem,

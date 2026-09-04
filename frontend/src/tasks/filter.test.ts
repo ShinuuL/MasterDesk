@@ -401,3 +401,54 @@ describe("escopo local (aba Tarefas)", () => {
     expect(matchesFilters(linked(), defaultFilters(CATALOG, "local"))).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Status fora do catálogo — o chamado 75249
+// ---------------------------------------------------------------------------
+
+describe("status fora do catálogo", () => {
+  const KNOWN = CATALOG.map((s) => s.value);
+
+  /**
+   * O espelho real do chamado 75249: veio da TAREFA do quadro do Mastersys, e a
+   * origem não mandou `ticketStatus` (campo ainda não publicado em produção),
+   * então o status é o da tarefa — `in_progress`, que não existe em
+   * `ticket_statuses`. O chamado está "Em Desenvolvimento" na origem.
+   */
+  function taskMirror(): Task {
+    return task({
+      title: "Ticket #75249: Alteração do relatório",
+      external: ext({
+        external_id: "task-1206",
+        ticket: "75249",
+        status_label: "in_progress",
+        status_parked: false,
+      }),
+    });
+  }
+
+  it("passa pelo filtro padrão de Chamados quando o catálogo não conhece o status", () => {
+    expect(matchesFilters(taskMirror(), defaultFilters(CATALOG), KNOWN)).toBe(true);
+  });
+
+  it("sem o catálogo em mão o recorte continua valendo para tudo", () => {
+    expect(matchesFilters(taskMirror(), defaultFilters(CATALOG))).toBe(false);
+  });
+
+  it("não afrouxa o recorte para status que o catálogo conhece", () => {
+    // A garantia que importa: pós-atendimento continua fora do quadro ativo.
+    expect(matchesFilters(posAtendimento(), defaultFilters(CATALOG), KNOWN)).toBe(false);
+  });
+
+  it("escolha explícita de status também não esconde o desconhecido", () => {
+    // Filtrar por "Novo" é pedir um recorte do vocabulário do Mastersys; o
+    // item que está fora desse vocabulário não é o que se quis excluir.
+    const f = { ...EMPTY_FILTERS, statuses: ["novo"] };
+    expect(matchesFilters(taskMirror(), f, KNOWN)).toBe(true);
+    expect(matchesFilters(task({ external: ext() }), f, KNOWN)).toBe(false);
+  });
+
+  it("applyTaskFilters repassa o vocabulário", () => {
+    expect(applyTaskFilters([taskMirror()], defaultFilters(CATALOG), "", KNOWN)).toHaveLength(1);
+  });
+});

@@ -204,6 +204,15 @@ export async function countTaskNotes(taskId: string): Promise<number> {
   return invoke<number>("count_task_notes", { taskId });
 }
 
+/**
+ * Contador de anotações de todas as tarefas, numa chamada só.
+ *
+ * Tarefa sem anotação não vem no mapa — quem lê trata ausência como zero.
+ */
+export async function countAllTaskNotes(): Promise<Record<string, number>> {
+  return invoke<Record<string, number>>("count_all_task_notes");
+}
+
 export async function updateTaskNote(id: string, content: string): Promise<TaskNote> {
   return invoke<TaskNote>("update_task_note", { id, content });
 }

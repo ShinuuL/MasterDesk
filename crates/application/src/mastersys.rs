@@ -262,6 +262,16 @@ impl MastersysSyncService {
 
         match existing {
             Some(mut task) => {
+                // Espelho já idêntico ao item: nada a gravar, nada a reagendar
+                // e — o que mais importa — nada a contar como mudança.
+                //
+                // `report.total_changes() > 0` é o que faz o `sync_scheduler`
+                // avisar a UI. Contar aqui sem comparar fazia toda rodada
+                // parecer uma rodada com mudança, e o quadro recarregava
+                // inteiro a cada ciclo. Ver `Task::matches_external`.
+                if task.matches_external(item) {
+                    return Ok(());
+                }
                 task.apply_external_update(item)?;
                 self.task_repo.save(&task).await?;
                 self.reschedule(&task).await;
@@ -449,6 +459,13 @@ mod tests {
             self.items.lock().unwrap().retain(|n| n.id != id);
             Ok(())
         }
+        async fn counts_by_task(&self) -> DomainResult<Vec<(TaskId, u32)>> {
+            let mut acc: HashMap<TaskId, u32> = HashMap::new();
+            for n in self.items.lock().unwrap().iter() {
+                *acc.entry(n.task_id).or_insert(0) += 1;
+            }
+            Ok(acc.into_iter().collect())
+        }
         async fn delete_by_task(&self, task_id: TaskId) -> DomainResult<()> {
             self.items.lock().unwrap().retain(|n| n.task_id != task_id);
             Ok(())
@@ -532,6 +549,38 @@ mod tests {
     }
 
     // ---- Tests -----------------------------------------------------------
+
+    /// A sincronização em vazio é o caso mais comum de todos: as salas globais
+    /// do Mastersys pedem sincronização a cada evento de qualquer usuário da
+    /// empresa, e na esmagadora maioria delas nada da fila deste usuário mudou.
+    /// Se essa rodada contar como mudança, a UI recarrega o quadro inteiro à
+    /// toa — foi o que fazia a tela piscar de 15 em 15 segundos.
+    #[tokio::test]
+    async fn resync_with_identical_items_reports_no_change() {
+        let f = fixture(vec![item("task-1", "Primeiro"), item("task-2", "Segundo")]);
+        let first = f.service.sync(SyncOptions::default()).await.unwrap();
+        assert_eq!(first.imported, 2);
+
+        let second = f.service.sync(SyncOptions::default()).await.unwrap();
+        assert_eq!(second.updated, 0, "nada mudou na origem");
+        assert_eq!(
+            second.total_changes(),
+            0,
+            "é `total_changes() > 0` que avisa a UI — em rodada sem mudança tem de ser zero"
+        );
+    }
+
+    #[tokio::test]
+    async fn resync_still_updates_when_the_item_really_changed() {
+        let f = fixture(vec![item("task-1", "Título antigo")]);
+        f.service.sync(SyncOptions::default()).await.unwrap();
+
+        *f.provider.items.lock().unwrap() = vec![item("task-1", "Título novo")];
+        let report = f.service.sync(SyncOptions::default()).await.unwrap();
+
+        assert_eq!(report.updated, 1);
+        assert_eq!(f.tasks.list_all().await.unwrap()[0].title, "Título novo");
+    }
 
     #[tokio::test]
     async fn first_sync_imports_open_items() {
@@ -732,7 +781,9 @@ mod tests {
 
         let report = f.service.sync(SyncOptions::default()).await.unwrap();
         assert_eq!(report.removed, 1);
-        assert_eq!(report.updated, 1);
+        // task-1 veio igual: não conta como atualização. Este assert era `1`
+        // quando toda rodada contava cada espelho como atualizado.
+        assert_eq!(report.updated, 0);
         let all = f.tasks.list_all().await.unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].title, "a");

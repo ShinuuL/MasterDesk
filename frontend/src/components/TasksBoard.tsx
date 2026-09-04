@@ -182,18 +182,38 @@ export function TasksBoard({ view }: Props) {
     }
   };
 
-  const refresh = async () => {
+  /**
+   * Recarrega o quadro.
+   *
+   * ## Por que existe `silent`
+   *
+   * O esqueleto de carregamento substitui a lista inteira. Mostrá-lo numa
+   * recarga de fundo — sincronização automática, volta do foco da janela — faz
+   * a tela **piscar**: a lista desaparece e volta, perdendo posição de rolagem
+   * e o que o usuário estava lendo. E recarga de fundo é a maioria delas.
+   *
+   * Então o esqueleto vale só para a primeira carga, quando de fato não há
+   * nada na tela para preservar. Depois disso a troca é silenciosa: os dados
+   * novos entram no lugar dos velhos e o React só mexe no que mudou.
+   *
+   * Erro também é silenciado na recarga de fundo: o quadro na tela continua
+   * válido, e uma faixa vermelha aparecendo sozinha durante uma sincronização
+   * assusta sem oferecer ação. Recarga pedida pelo usuário mostra o erro.
+   */
+  const refresh = async ({ silent = false }: { silent?: boolean } = {}) => {
     try {
-      setLoading(true);
-      setError(null);
+      if (!silent) {
+        setLoading(true);
+        setError(null);
+      }
       const [p, c] = await Promise.all([api.listPendingTasks(), api.listCompletedTasks()]);
       setPending(p);
       setCompleted(c);
       await reconcileWindows([...p, ...c]);
     } catch (e) {
-      setError(String(e));
+      if (!silent) setError(String(e));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -264,7 +284,8 @@ export function TasksBoard({ view }: Props) {
     (async () => {
       try {
         const un = await api.onMastersysSynced(() => {
-          if (!cancelled) void refresh();
+          // Silencioso: é recarga de fundo, e o usuário não pediu nada.
+          if (!cancelled) void refresh({ silent: true });
         });
         if (!cancelled) unlisten = un;
         else un();
@@ -288,7 +309,15 @@ export function TasksBoard({ view }: Props) {
       try {
         const { getCurrentWindow } = await import("@tauri-apps/api/window");
         const un = await getCurrentWindow().onFocusChanged(({ payload }) => {
-          if (payload && !cancelled) void refresh();
+          if (payload && !cancelled) {
+            // Silencioso: voltar para o app não pode apagar o quadro que o
+            // usuário estava olhando um segundo antes.
+            void refresh({ silent: true });
+            // O contador também: o usuário pode ter escrito uma anotação na
+            // janela destacada de uma tarefa, e o card no quadro precisa
+            // refletir isso. É uma consulta, não uma por tarefa.
+            void refreshNoteCounts();
+          }
         });
         if (!cancelled) unlisten = un;
         else un();
@@ -318,26 +347,43 @@ export function TasksBoard({ view }: Props) {
 
   // Contador de anotações por tarefa, para o board mostrar o número sem que o
   // usuário precise expandir cada card.
+  // Uma consulta para o quadro inteiro (`count_all_task_notes`), e não uma por
+  // tarefa: com algumas centenas de chamados na fila, o laço anterior disparava
+  // uma travessia de IPC e uma consulta SQLite por card a cada recarga — e o
+  // quadro recarrega a cada sincronização.
+  //
+  // Depende do TAMANHO das listas, não das listas em si: um sync que só mexeu
+  // no título de um chamado não muda contador de anotação nenhum, e reconsultar
+  // ali seria trabalho jogado fora. Escrever ou apagar anotação já chama
+  // `refreshNoteCounts` pelo caminho que fez a mudança.
+  const taskCount = pending.length + completed.length;
+
+  const refreshNoteCounts = async () => {
+    try {
+      setNoteCounts(await api.countAllTaskNotes());
+    } catch {
+      // Contador é enfeite do card: sem ele o quadro funciona igual.
+    }
+  };
+
   useEffect(() => {
-    const all = [...pending, ...completed];
-    if (all.length === 0) return;
+    if (taskCount === 0) {
+      setNoteCounts({});
+      return;
+    }
     let cancelled = false;
     (async () => {
-      const entries = await Promise.all(
-        all.map(async (t) => {
-          try {
-            return [t.id, await api.countTaskNotes(t.id)] as const;
-          } catch {
-            return [t.id, 0] as const;
-          }
-        }),
-      );
-      if (!cancelled) setNoteCounts(Object.fromEntries(entries));
+      try {
+        const counts = await api.countAllTaskNotes();
+        if (!cancelled) setNoteCounts(counts);
+      } catch {
+        // Idem: silencioso de propósito.
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [pending, completed]);
+  }, [taskCount]);
 
   const externalCount = useMemo(
     () => [...pending, ...completed].filter((t) => t.external !== null).length,
@@ -367,17 +413,32 @@ export function TasksBoard({ view }: Props) {
   /** A lista pendente desta aba. Concluídos não usa (tem as suas duas). */
   const pendingOfView = view === "local" ? localPending : mastersysPending;
 
+  /**
+   * Vocabulário de status que o recorte de status pode decidir.
+   *
+   * Espelho com status fora daqui não é filtrado por status — senão ele não
+   * teria aba nenhuma onde aparecer. Ver `isStatusFilterable` em `filter.ts`.
+   *
+   * Vazio enquanto o catálogo não chega: `undefined` mantém o recorte valendo
+   * para tudo, e nesse instante `filters.statuses` também está vazio (o default
+   * sem catálogo mostra tudo), então nada é escondido no meio do caminho.
+   */
+  const knownStatuses = useMemo(
+    () => (catalog.length > 0 ? catalog.map((s) => s.value) : undefined),
+    [catalog],
+  );
+
   const visiblePending = useMemo(
-    () => applyTaskFilters(pendingOfView, filters, search),
-    [pendingOfView, filters, search],
+    () => applyTaskFilters(pendingOfView, filters, search, knownStatuses),
+    [pendingOfView, filters, search, knownStatuses],
   );
   const visibleCompleted = useMemo(
-    () => applyTaskFilters(completed, filters, search),
-    [completed, filters, search],
+    () => applyTaskFilters(completed, filters, search, knownStatuses),
+    [completed, filters, search, knownStatuses],
   );
   const visibleParked = useMemo(
-    () => applyTaskFilters(parkedPending, filters, search),
-    [parkedPending, filters, search],
+    () => applyTaskFilters(parkedPending, filters, search, knownStatuses),
+    [parkedPending, filters, search, knownStatuses],
   );
   const clients = useMemo(
     () => clientsInTasks([...pending, ...completed]),
