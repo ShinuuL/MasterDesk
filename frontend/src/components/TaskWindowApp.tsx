@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { MastersysTicketStatus, Task } from "../types";
 import * as api from "../api";
 import { TaskNotes } from "./TaskNotes";
-import { StatusBadge } from "./StatusBadge";
+import { TaskOriginStamp } from "./TaskOriginStamp";
 import { isOverdue, isParked } from "../tasks/filter";
 
 interface Props {
@@ -209,25 +209,11 @@ export function TaskWindowApp({ taskId }: Props) {
       </div>
 
       <div className="md-taskwindow-body">
-        {task.external && (
-          <div className="md-stamp">
-            {task.external.status_label && (
-              <StatusBadge
-                statusLabel={task.external.status_label}
-                catalog={catalog}
-                parked={parked}
-              />
-            )}
-            {task.external.ticket && (
-              <span className="md-stamp-ticket">#{task.external.ticket}</span>
-            )}
-            {task.external.client && (
-              <span className="md-stamp-client" title={task.external.client}>
-                {task.external.client}
-              </span>
-            )}
-          </div>
-        )}
+        {/* Mesmo selo do quadro — a janela destacada mostra a mesma tarefa e
+            não pode contar uma história diferente sobre a origem dela. Sem
+            `onOpenTicket`: aqui não há espaço para um diálogo, e a leitura do
+            chamado fica no quadro. */}
+        <TaskOriginStamp task={task} catalog={catalog} parked={parked} />
 
         <div className="md-taskwindow-meta">
           <span>

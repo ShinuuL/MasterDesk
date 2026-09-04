@@ -3,6 +3,7 @@ import type { MastersysTicketStatus } from "../types";
 import {
   countActiveFilters,
   defaultFilters,
+  type FilterScope,
   type TaskFilterState,
   type TriState,
 } from "../tasks/filter";
@@ -20,6 +21,8 @@ interface Props {
   /** Ação de busca ao vivo, habilitada a partir de 3 caracteres. */
   onRemoteSearch?: () => void;
   remoteSearching?: boolean;
+  /** Qual aba filtra — decide o default contra o qual "ativo" é medido. */
+  scope?: FilterScope;
 }
 
 /** Mínimo do `GET /api/tickets/search` do Mastersys. */
@@ -42,12 +45,13 @@ export function TaskFilters({
   onSearchInput,
   onRemoteSearch,
   remoteSearching,
+  scope = "mastersys",
 }: Props) {
   const [open, setOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
-  const active = countActiveFilters(filters, catalog);
+  const active = countActiveFilters(filters, catalog, scope);
   const canRemoteSearch =
     onRemoteSearch !== undefined &&
     searchInput.trim().length >= REMOTE_SEARCH_MIN;
@@ -141,7 +145,9 @@ export function TaskFilters({
 
       {open && (
         <div ref={popoverRef} className="md-filter-popover" role="dialog" aria-label="Filtros">
-          {catalog.length > 0 && (
+          {/* Status é vocabulário do Mastersys: numa aba de tarefas locais não
+              há um único item que o tenha, e o recorte não filtraria nada. */}
+          {catalog.length > 0 && scope !== "local" && (
             <fieldset className="md-filter-group">
               <legend>Status</legend>
               <div className="md-filter-chips">
@@ -243,27 +249,34 @@ export function TaskFilters({
             </label>
           </div>
 
-          <div className="md-filter-row">
-            <label className="md-filter-field">
-              <span>Origem</span>
-              <select
-                className="md-input"
-                value={filters.origin}
-                onChange={(e) =>
-                  set("origin", e.target.value as TaskFilterState["origin"])
-                }
-              >
-                <option value="all">Todas</option>
-                <option value="local">Locais</option>
-                <option value="mastersys">Mastersys</option>
-              </select>
-            </label>
-          </div>
+          {/* `Origem` só existe onde as duas convivem — hoje, a aba
+              Concluídos. Nas abas Tarefas e Chamados a separação já é
+              estrutural, e oferecer o filtro ali daria ao usuário um jeito de
+              esvaziar o próprio quadro ("Mastersys" em Tarefas não casa com
+              nada) sem que a tela explique o porquê. */}
+          {scope === "done" && (
+            <div className="md-filter-row">
+              <label className="md-filter-field">
+                <span>Origem</span>
+                <select
+                  className="md-input"
+                  value={filters.origin}
+                  onChange={(e) =>
+                    set("origin", e.target.value as TaskFilterState["origin"])
+                  }
+                >
+                  <option value="all">Todas</option>
+                  <option value="local">Locais</option>
+                  <option value="mastersys">Mastersys</option>
+                </select>
+              </label>
+            </div>
+          )}
 
           <div className="md-filter-foot">
             <button
               className="md-btn md-btn--ghost"
-              onClick={() => onChange(defaultFilters(catalog))}
+              onClick={() => onChange(defaultFilters(catalog, scope))}
             >
               Limpar filtros
             </button>

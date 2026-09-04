@@ -13,8 +13,15 @@
  * realmente persiste. Ficaram de fora, por falta de dado e não por escolha de
  * UI: `Criado por` (criador não é sincronizado), `Vínculo com agendamento`
  * (`linkedSchedules` não é sincronizado) e `Usuários (colunas)` (o quadro daqui
- * é pessoal). Entrou um filtro que o suporte não tem — `Origem` — porque este
- * quadro mistura tarefas locais com espelhos.
+ * é pessoal). Entrou um filtro que o suporte não tem — `Origem` — para quando
+ * tarefas locais e espelhos convivem numa mesma lista.
+ *
+ * ## Um estado de filtro por aba
+ *
+ * Tarefas (locais), Chamados (espelhos) e Concluídos usam o mesmo predicado,
+ * mas defaults e preferências separados — ver [`FilterScope`]. Depois que as
+ * abas passaram a separar a origem por estrutura, `Origem` só é oferecido em
+ * Concluídos, a única lista onde as duas ainda se misturam.
  */
 
 import type { MastersysTicketStatus, Task } from "../types";
@@ -68,19 +75,38 @@ export const EMPTY_FILTERS: TaskFilterState = {
  */
 export function defaultFilters(
   catalog: MastersysTicketStatus[],
+  scope: FilterScope = "mastersys",
 ): TaskFilterState {
+  // Só o quadro de Chamados nasce com recorte de status.
+  //
+  // Em `local` não existe status de origem para recortar — a aba é de tarefas
+  // que nunca vieram do Mastersys. Em `done` a aba já É o recorte (concluídas
+  // + parados na origem), e herdar o default do quadro ativo esconderia
+  // pós-atendimento e finalizado, que é justamente o que ela mostra.
+  if (scope !== "mastersys") return { ...EMPTY_FILTERS };
   return {
     ...EMPTY_FILTERS,
     statuses: catalog.filter((s) => s.default_filter).map((s) => s.value),
   };
 }
 
+/**
+ * Qual quadro está filtrando.
+ *
+ * Cada um tem default e preferência **próprios**: o recorte de status que faz
+ * sentido na fila de chamados não faz sentido nenhum numa aba de tarefas
+ * locais, e uma chave só de `localStorage` faria a escolha de uma aba vazar
+ * nas outras.
+ */
+export type FilterScope = "local" | "mastersys" | "done";
+
 /** Quantos filtros estão ativos — alimenta o badge do botão "Filtros". */
 export function countActiveFilters(
   filters: TaskFilterState,
   catalog: MastersysTicketStatus[],
+  scope: FilterScope = "mastersys",
 ): number {
-  const base = defaultFilters(catalog);
+  const base = defaultFilters(catalog, scope);
   let n = 0;
   // Status conta como ativo só quando difere do default, senão o badge
   // marcaria "1" numa tela recém-aberta.
@@ -119,6 +145,22 @@ export function isParked(task: Task): boolean {
 }
 
 /**
+ * Número do chamado relacionado, seja pelo espelho ou pelo vínculo manual.
+ *
+ * O filtro tem de ver o mesmo chamado que o card mostra. Sem isto, uma tarefa
+ * vinculada exibia `#991` no selo e desaparecia ao filtrar por 991 ou por "tem
+ * chamado" — a UI afirmando uma coisa e o filtro outra.
+ */
+export function relatedTicket(task: Task): string | null {
+  return task.external?.ticket ?? task.link?.ticket ?? null;
+}
+
+/** Cliente relacionado, pelo espelho ou pelo vínculo manual. */
+export function relatedClient(task: Task): string | null {
+  return task.external?.client ?? task.link?.client ?? null;
+}
+
+/**
  * Termo de busca casa a tarefa?
  *
  * Cobre os mesmos campos que a busca do suporte alcança em `TaskRepository`:
@@ -132,13 +174,18 @@ export function matchesSearch(task: Task, rawTerm: string): boolean {
   // `#1042` e `1042` devem achar o mesmo chamado — o suporte aceita o `#` e
   // quem digita costuma incluir.
   const numeric = term.replace(/^#/, "");
-  if (numeric !== "" && /^\d+$/.test(numeric) && task.external?.ticket === numeric) {
+  if (numeric !== "" && /^\d+$/.test(numeric) && relatedTicket(task) === numeric) {
     return true;
   }
 
-  return [task.title, task.description, task.external?.client ?? ""].some((f) =>
-    f.toLowerCase().includes(term),
-  );
+  return [
+    task.title,
+    task.description,
+    relatedClient(task) ?? "",
+    // Status escrito pelo usuário é vocabulário dele: buscar por "aguardando
+    // peça" precisa achar as tarefas que ele marcou assim.
+    task.link?.custom_status ?? "",
+  ].some((f) => f.toLowerCase().includes(term));
 }
 
 /** Aplica um estado de filtro a uma tarefa. */
@@ -151,22 +198,27 @@ export function matchesFilters(task: Task, filters: TaskFilterState): boolean {
   if (filters.statuses.length > 0) {
     // Tarefa local não tem status de origem. Ela sobrevive a um recorte de
     // status porque o filtro é sobre o vocabulário do Mastersys — esconder as
-    // locais aqui seria efeito colateral, não intenção. Quem quer só espelhos
-    // usa o filtro `Origem`.
+    // locais aqui seria efeito colateral, não intenção. Isso importa em
+    // Concluídos, a lista onde locais e espelhos convivem.
     if (ext !== null && !filters.statuses.includes(ext.status_label ?? "")) {
       return false;
     }
   }
 
+  // Chamado e cliente valem tanto pelo espelho quanto pelo vínculo manual —
+  // ver `relatedTicket`.
+  const ticket = relatedTicket(task);
+  const client = relatedClient(task);
+
   if (filters.clients.length > 0) {
-    if (!ext?.client || !filters.clients.includes(ext.client)) return false;
+    if (!client || !filters.clients.includes(client)) return false;
   }
 
   const wantedTicket = filters.ticket.trim().replace(/^#/, "");
-  if (wantedTicket !== "" && ext?.ticket !== wantedTicket) return false;
+  if (wantedTicket !== "" && ticket !== wantedTicket) return false;
 
-  if (filters.hasTicket === "yes" && !ext?.ticket) return false;
-  if (filters.hasTicket === "no" && ext?.ticket) return false;
+  if (filters.hasTicket === "yes" && !ticket) return false;
+  if (filters.hasTicket === "no" && ticket) return false;
 
   if (filters.deadlineFrom !== "" || filters.deadlineTo !== "") {
     // Sem prazo nunca casa um recorte por prazo. O suporte faz o oposto
@@ -213,7 +265,10 @@ export function applyTaskFilters(
 export function clientsInTasks(tasks: Task[]): string[] {
   const set = new Set<string>();
   for (const t of tasks) {
-    if (t.external?.client) set.add(t.external.client);
+    // Inclui o cliente do vínculo manual: ele é filtrável como qualquer
+    // outro, e a lista precisa oferecer o que o filtro aceita.
+    const client = relatedClient(t);
+    if (client) set.add(client);
   }
   return [...set].sort((a, b) => a.localeCompare(b, "pt-BR"));
 }
@@ -222,7 +277,15 @@ export function clientsInTasks(tasks: Task[]): string[] {
 // Persistência
 // ---------------------------------------------------------------------------
 
-const STORAGE_KEY = "masterdesk.task-filters";
+/**
+ * Chave por aba. `mastersys` mantém o nome antigo porque herda o quadro que
+ * existia — quem já tinha filtro configurado não o perde; as outras são novas.
+ */
+const STORAGE_KEYS: Record<FilterScope, string> = {
+  mastersys: "masterdesk.task-filters",
+  local: "masterdesk.task-filters.local",
+  done: "masterdesk.task-filters.done",
+};
 
 /**
  * `localStorage`, não SQLite — seguindo o mesmo raciocínio que `theme.ts`
@@ -236,24 +299,30 @@ const STORAGE_KEY = "masterdesk.task-filters";
  * O termo de busca **não** é persistido, como no suporte: busca é intenção do
  * momento, filtro é configuração.
  */
-export function loadFilters(catalog: MastersysTicketStatus[]): TaskFilterState {
+export function loadFilters(
+  catalog: MastersysTicketStatus[],
+  scope: FilterScope = "mastersys",
+): TaskFilterState {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaultFilters(catalog);
+    const raw = window.localStorage.getItem(STORAGE_KEYS[scope]);
+    if (!raw) return defaultFilters(catalog, scope);
     const parsed = JSON.parse(raw) as Partial<TaskFilterState>;
     // Mescla sobre o default em vez de confiar no gravado: uma versão anterior
     // pode não ter algum campo, e `undefined` num filtro quebraria o predicado.
-    return { ...defaultFilters(catalog), ...parsed };
+    return { ...defaultFilters(catalog, scope), ...parsed };
   } catch {
     // JSON corrompido ou storage indisponível (modo privado, política de
     // grupo). Filtro é conveniência: cair no default é melhor que falhar.
-    return defaultFilters(catalog);
+    return defaultFilters(catalog, scope);
   }
 }
 
-export function saveFilters(filters: TaskFilterState): void {
+export function saveFilters(
+  filters: TaskFilterState,
+  scope: FilterScope = "mastersys",
+): void {
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(filters));
+    window.localStorage.setItem(STORAGE_KEYS[scope], JSON.stringify(filters));
   } catch {
     // Ignorado de propósito: não gravar a preferência não pode impedir o
     // usuário de filtrar.

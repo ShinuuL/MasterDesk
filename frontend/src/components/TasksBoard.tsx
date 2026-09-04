@@ -5,6 +5,9 @@ import { TaskNotes } from "./TaskNotes";
 import { MastersysPanel } from "./MastersysPanel";
 import { TaskFilters } from "./TaskFilters";
 import { StatusBadge } from "./StatusBadge";
+import { TaskOriginStamp } from "./TaskOriginStamp";
+import { TaskFormModal } from "./TaskFormModal";
+import { TicketModal } from "./TicketModal";
 import {
   applyTaskFilters,
   clientsInTasks,
@@ -12,19 +15,9 @@ import {
   isParked,
   loadFilters,
   saveFilters,
+  type FilterScope,
   type TaskFilterState,
 } from "../tasks/filter";
-
-const PRESET_THRESHOLDS: { label: string; minutes: number }[] = [
-  { label: "5m", minutes: 5 },
-  { label: "10m", minutes: 10 },
-  { label: "15m", minutes: 15 },
-  { label: "30m", minutes: 30 },
-  { label: "1h", minutes: 60 },
-  { label: "2h", minutes: 120 },
-];
-
-const PRIORITIES: Priority[] = ["Low", "Medium", "High", "Urgent"];
 
 const PRIORITY_VAR: Record<Priority, string> = {
   Low: "var(--prio-low)",
@@ -60,18 +53,47 @@ function formatDeadline(iso: string | null): string {
   return d.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 }
 
-export function TasksBoard() {
+/** Qual das três abas de trabalho este quadro está desenhando. */
+export type BoardView = "local" | "mastersys" | "completed";
+
+interface Props {
+  /**
+   * Qual recorte este quadro mostra.
+   *
+   * | `view`       | aba        | conteúdo |
+   * |--------------|------------|----------|
+   * | `local`      | Tarefas    | tarefas suas, pendentes (com ou sem vínculo manual) |
+   * | `mastersys`  | Chamados   | espelhos da sua fila que a origem considera ativos |
+   * | `completed`  | Concluídos | concluídas + espelhos parados na origem |
+   *
+   * Um componente para as três porque filtro, busca, catálogo de status,
+   * anotações, pop-out e reconciliação de janelas valem igual — duplicá-lo
+   * faria as telas divergirem na primeira correção feita só de um lado.
+   */
+  view: BoardView;
+}
+
+export function TasksBoard({ view }: Props) {
   const [pending, setPending] = useState<Task[]>([]);
   const [completed, setCompleted] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [priority, setPriority] = useState<Priority>("Medium");
-  const [deadlineLocal, setDeadlineLocal] = useState("");
-  const [thresholds, setThresholds] = useState<Set<number>>(new Set());
-  const [customMinutes, setCustomMinutes] = useState("");
+  /** Diálogo de criação aberto: tarefa comum ou vinculada a um chamado. */
+  const [creating, setCreating] = useState<null | "plain" | "link">(null);
+  /** Tarefa cujo chamado está aberto para leitura. */
+  const [ticketOf, setTicketOf] = useState<Task | null>(null);
+  /**
+   * Chamado que a nova tarefa vinculada já vem apontando.
+   *
+   * O "vincular" nasce a partir de um card — o chamado é o daquele item, não
+   * algo a redigitar. Quem precisa vincular a um chamado que não está no
+   * quadro usa o interruptor dentro de "Nova tarefa", que oferece a busca.
+   */
+  const [linkSeed, setLinkSeed] = useState<{ ticket: string; client: string | null } | null>(null);
+
+  /** Preferências de filtro são por aba — ver `FilterScope`. */
+  const scope: FilterScope = view === "completed" ? "done" : view;
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [noteCounts, setNoteCounts] = useState<Record<string, number>>({});
@@ -81,7 +103,7 @@ export function TasksBoard() {
   // isso `loadFilters` roda de novo quando ele chega (ver efeito abaixo) —
   // sem catálogo não há como saber quais status são o default da origem.
   const [catalog, setCatalog] = useState<MastersysTicketStatus[]>([]);
-  const [filters, setFilters] = useState<TaskFilterState>(() => loadFilters([]));
+  const [filters, setFilters] = useState<TaskFilterState>(() => loadFilters([], scope));
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [remoteResults, setRemoteResults] = useState<ExternalWorkItem[] | null>(null);
@@ -189,7 +211,7 @@ export function TasksBoard() {
         const cat = await api.mastersysStatusCatalog();
         if (cancelled) return;
         setCatalog(cat);
-        setFilters(loadFilters(cat));
+        setFilters(loadFilters(cat, scope));
       } catch {
         // Catálogo é dado de apresentação: sem ele o quadro mostra o slug sem
         // cor e o filtro de status desaparece, mas nada deixa de funcionar.
@@ -206,7 +228,7 @@ export function TasksBoard() {
 
   useEffect(() => {
     if (!hydrated) return;
-    saveFilters(filters);
+    saveFilters(filters, scope);
   }, [filters, hydrated]);
 
   // Como a sincronização está funcionando agora. Reconsultado após cada sync
@@ -322,20 +344,58 @@ export function TasksBoard() {
     [pending, completed],
   );
 
+  /**
+   * As três fatias, decididas por **estrutura** e não por filtro.
+   *
+   * - `localPending` — o que é seu: `external === null`. Tarefa vinculada a um
+   *   chamado continua aqui, porque o dono dela é você e nenhum sync a toca.
+   * - `mastersysPending` — sua fila no suporte, sem os parados.
+   * - `parkedPending` — espelho que a origem considera parado
+   *   (pós-atendimento, finalizado). Não está concluído localmente (segue em
+   *   `list_pending`), mas também não é trabalho ativo. Antes ficava escondido
+   *   pelo filtro padrão sem ter onde aparecer; agora mora em Concluídos.
+   *
+   * Consequência: nenhum item aparece em duas abas, qualquer que seja o filtro.
+   */
+  const localPending = useMemo(() => pending.filter((t) => t.external === null), [pending]);
+  const mastersysPending = useMemo(
+    () => pending.filter((t) => t.external !== null && !isParked(t)),
+    [pending],
+  );
+  const parkedPending = useMemo(() => pending.filter(isParked), [pending]);
+
+  /** A lista pendente desta aba. Concluídos não usa (tem as suas duas). */
+  const pendingOfView = view === "local" ? localPending : mastersysPending;
+
   const visiblePending = useMemo(
-    () => applyTaskFilters(pending, filters, search),
-    [pending, filters, search],
+    () => applyTaskFilters(pendingOfView, filters, search),
+    [pendingOfView, filters, search],
   );
   const visibleCompleted = useMemo(
     () => applyTaskFilters(completed, filters, search),
     [completed, filters, search],
   );
+  const visibleParked = useMemo(
+    () => applyTaskFilters(parkedPending, filters, search),
+    [parkedPending, filters, search],
+  );
   const clients = useMemo(
     () => clientsInTasks([...pending, ...completed]),
     [pending, completed],
   );
+  /**
+   * Itens escondidos pelo filtro **nesta aba**.
+   *
+   * Contar as duas listas faria a aba Concluídos anunciar pendentes ocultas
+   * que ela nunca mostraria — número verdadeiro, resposta errada à pergunta
+   * "o que o filtro está me esconde aqui?".
+   */
   const hiddenCount =
-    pending.length + completed.length - (visiblePending.length + visibleCompleted.length);
+    view !== "completed"
+      ? pendingOfView.length - visiblePending.length
+      : completed.length +
+        parkedPending.length -
+        (visibleCompleted.length + visibleParked.length);
 
   const handleRemoteSearch = async () => {
     setRemoteSearching(true);
@@ -383,15 +443,6 @@ export function TasksBoard() {
     }
   };
 
-  const toggleThreshold = (minutes: number) => {
-    setThresholds((prev) => {
-      const next = new Set(prev);
-      if (next.has(minutes)) next.delete(minutes);
-      else next.add(minutes);
-      return next;
-    });
-  };
-
   const toggleExpanded = (id: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -399,39 +450,6 @@ export function TasksBoard() {
       else next.add(id);
       return next;
     });
-  };
-
-  const collectThresholdMinutes = (): number[] => {
-    const mins = new Set<number>(thresholds);
-    const custom = parseInt(customMinutes, 10);
-    if (!isNaN(custom) && custom > 0) mins.add(custom);
-    return Array.from(mins);
-  };
-
-  const handleCreate = async () => {
-    if (!title.trim()) return;
-    try {
-      const deadline =
-        deadlineLocal && !isNaN(new Date(deadlineLocal).getTime())
-          ? new Date(deadlineLocal).toISOString()
-          : undefined;
-      const thresholdsArr = collectThresholdMinutes();
-      await api.createTask({
-        title: title.trim(),
-        description: description.trim() || undefined,
-        priority,
-        deadline,
-        reminder_thresholds: thresholdsArr.length > 0 ? thresholdsArr : undefined,
-      });
-      setTitle("");
-      setDescription("");
-      setDeadlineLocal("");
-      setThresholds(new Set());
-      setCustomMinutes("");
-      await refresh();
-    } catch (e) {
-      setError(String(e));
-    }
   };
 
   const handleComplete = async (id: string) => {
@@ -499,31 +517,15 @@ export function TasksBoard() {
         }`}
         style={{ borderLeftColor: PRIORITY_VAR[t.priority] }}
       >
-        {t.external && (
-          <div className="md-stamp">
-            {/* Status primeiro: é o dado que decide se o item precisa de ação
-                agora. Antes ficava no fim da linha em texto apagado e passava
-                despercebido. */}
-            {t.external.status_label && (
-              <StatusBadge
-                statusLabel={t.external.status_label}
-                catalog={catalog}
-                parked={parked}
-              />
-            )}
-            <span className="md-stamp-origin">
-              {t.external.kind === "Ticket" ? "Chamado" : "Tarefa"} · Mastersys
-            </span>
-            {t.external.ticket && (
-              <span className="md-stamp-ticket">#{t.external.ticket}</span>
-            )}
-            {t.external.client && (
-              <span className="md-stamp-client" title={t.external.client}>
-                {t.external.client}
-              </span>
-            )}
-          </div>
-        )}
+        {/* Origem sempre visível — inclusive "Local". Ver `TaskOriginStamp`. */}
+        <TaskOriginStamp
+          task={t}
+          catalog={catalog}
+          parked={parked}
+          onOpenTicket={
+            t.external?.ticket || t.link?.ticket ? () => setTicketOf(t) : undefined
+          }
+        />
 
         <div className="md-task-head">
           <span className="md-task-title">{t.title}</span>
@@ -589,6 +591,28 @@ export function TasksBoard() {
             </span>
           </button>
 
+          {/* Vincular nasce aqui, não numa barra no topo: o chamado que se
+              quer acompanhar é o deste card, então ele já vem preenchido em
+              vez de ser redigitado. Só aparece quando há chamado — vincular
+              uma tarefa a uma tarefa local não significa nada. */}
+          {(t.external?.ticket || t.link?.ticket) && (
+            <button
+              onClick={() => {
+                setLinkSeed({
+                  ticket: (t.external?.ticket ?? t.link?.ticket) as string,
+                  client: t.external?.client ?? t.link?.client ?? null,
+                });
+                setCreating("link");
+              }}
+              className="md-btn md-btn--ghost"
+              title={`Criar uma tarefa sua ligada ao chamado #${
+                t.external?.ticket ?? t.link?.ticket
+              } — o Mastersys não é alterado`}
+            >
+              Vincular tarefa
+            </button>
+          )}
+
           {poppedOut.has(t.id) ? (
             <button
               onClick={() => void handleClosePopOut(t.id)}
@@ -631,7 +655,16 @@ export function TasksBoard() {
     );
   };
 
-  const isEmptyAll = !loading && pending.length === 0 && completed.length === 0;
+  /**
+   * Quadro vazio de verdade — não "vazio por filtro", que tem mensagem
+   * própria. Na aba Concluídos só as concluídas contam: um quadro cheio de
+   * pendentes ainda não tem nada a mostrar ali.
+   */
+  const isEmptyAll =
+    !loading &&
+    (view === "completed"
+      ? completed.length === 0 && parkedPending.length === 0
+      : pendingOfView.length === 0);
 
   return (
     <div
@@ -644,21 +677,32 @@ export function TasksBoard() {
       }}
     >
       <header className="md-board-header">
-        <strong className="md-board-title">Tarefas</strong>
-        <button className="md-btn" onClick={() => setShowMastersys(true)}>
-          Mastersys
-          {externalCount > 0 && (
-            <span className="md-notes-count" style={{ marginLeft: 6 }}>
-              {externalCount}
-            </span>
-          )}
-        </button>
+        <strong className="md-board-title">
+          {view === "local" ? "Tarefas" : view === "mastersys" ? "Chamados" : "Concluídos"}
+        </strong>
+        {/* O painel da integração pertence às abas que mostram o Mastersys.
+            Na aba de tarefas locais ele seria um botão sobre um sistema que
+            aquele quadro não usa. */}
+        {view !== "local" && (
+          <button className="md-btn" onClick={() => setShowMastersys(true)}>
+            Mastersys
+            {externalCount > 0 && (
+              <span className="md-notes-count" style={{ marginLeft: 6 }}>
+                {externalCount}
+              </span>
+            )}
+          </button>
+        )}
         <span className="md-count">
-          {pending.length} pendentes · {completed.length} concluídas
+          {view === "completed"
+            ? `${completed.length} concluídas · ${parkedPending.length} aguardando`
+            : `${pendingOfView.length} ${view === "local" ? "pendentes" : "na sua fila"}`}
           {hiddenCount > 0 && ` · ${hiddenCount} oculta(s) por filtro`}
         </span>
 
-        {liveSync && externalCount > 0 && (
+        {/* Como o quadro se mantém atualizado só diz respeito a quem espelha
+            o Mastersys. Em Tarefas locais não há o que sincronizar. */}
+        {view !== "local" && liveSync && externalCount > 0 && (
           <span
             className={`md-livesync ${liveSync.realtime ? "md-livesync--on" : ""}`}
             title={
@@ -683,8 +727,11 @@ export function TasksBoard() {
         clients={clients}
         searchInput={searchInput}
         onSearchInput={setSearchInput}
-        onRemoteSearch={handleRemoteSearch}
+        // Busca ao vivo consulta a API do suporte: só faz sentido na aba que
+        // fala com ele.
+        onRemoteSearch={view === "mastersys" ? handleRemoteSearch : undefined}
         remoteSearching={remoteSearching}
+        scope={scope}
       />
 
       {remoteResults !== null && (
@@ -737,102 +784,28 @@ export function TasksBoard() {
         </section>
       )}
 
-      <div className="md-create-bar" style={{ gap: 12 }}>
-        <div className="md-field" style={{ flex: "0 0 200px" }}>
-          <label htmlFor="task-title">Título</label>
-          <input
-            id="task-title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Título da tarefa"
-            maxLength={200}
-            className="md-input"
-          />
-        </div>
-        <div className="md-field" style={{ flex: "1 1 160px" }}>
-          <label htmlFor="task-desc">Descrição</label>
-          <input
-            id="task-desc"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Descrição opcional"
-            className="md-input"
-            style={{ width: "100%" }}
-          />
-        </div>
-        <div className="md-field">
-          <label htmlFor="task-prio">Prioridade</label>
-          <select
-            id="task-prio"
-            value={priority}
-            onChange={(e) => setPriority(e.target.value as Priority)}
-            className="md-select"
+      {/* Criar deixou de ocupar duas faixas fixas do quadro: o formulário
+          inteiro (descrição, lembretes, vínculo) vive no diálogo.
+          Só na aba de tarefas locais: chamado não se cria aqui (a integração
+          é somente leitura), e concluída não se cria — se conclui. */}
+      {view === "local" && (
+        <div className="md-create-bar" style={{ gap: 8 }}>
+          <button
+            onClick={() => {
+              setLinkSeed(null);
+              setCreating("plain");
+            }}
+            className="md-primary md-primary-accent"
           >
-            {PRIORITIES.map((p) => (
-              <option key={p} value={p}>
-                {PRIORITY_LABEL[p]}
-              </option>
-            ))}
-          </select>
+            Nova tarefa
+          </button>
+          <span className="md-panel-note" style={{ margin: 0 }}>
+            Para vincular uma tarefa a um chamado, use <strong>Vincular
+            tarefa</strong> no card dele — ou o interruptor de vínculo aqui, que
+            busca o chamado.
+          </span>
         </div>
-        <div className="md-field">
-          <label htmlFor="task-deadline">Prazo</label>
-          <input
-            id="task-deadline"
-            type="datetime-local"
-            value={deadlineLocal}
-            onChange={(e) => setDeadlineLocal(e.target.value)}
-            className="md-input"
-          />
-        </div>
-      </div>
-
-      <div
-        style={{
-          padding: "8px 14px",
-          background: "var(--canvas)",
-          borderBottom: "1px solid var(--line)",
-          display: "flex",
-          gap: 16,
-          alignItems: "center",
-          flexWrap: "wrap",
-        }}
-      >
-        <span className="md-eyebrow">Lembretes antes do prazo:</span>
-        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-          {PRESET_THRESHOLDS.map((p) => (
-            <button
-              key={p.minutes}
-              type="button"
-              className="md-chip"
-              aria-pressed={thresholds.has(p.minutes)}
-              onClick={() => toggleThreshold(p.minutes)}
-            >
-              {p.label}
-            </button>
-          ))}
-          <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
-            Outro:
-            <input
-              type="number"
-              min={1}
-              value={customMinutes}
-              onChange={(e) => setCustomMinutes(e.target.value)}
-              placeholder="min"
-              className="md-input"
-              style={{ width: 72, padding: "6px 8px", minHeight: 32 }}
-            />
-          </label>
-        </div>
-        <button
-          onClick={() => void handleCreate()}
-          disabled={!title.trim()}
-          className="md-primary md-primary-accent"
-          style={{ marginLeft: "auto" }}
-        >
-          Nova tarefa
-        </button>
-      </div>
+      )}
 
       {error && (
         <div role="alert" className="md-alert">
@@ -892,31 +865,118 @@ export function TasksBoard() {
                 />
               </svg>
             </div>
-            <h3>Nenhuma tarefa ainda</h3>
-            <p>
-              Crie a primeira tarefa acima com prioridade, prazo e lembretes. Ou
-              conecte o Mastersys para trazer as tarefas e chamados atribuídos a
-              você.
-            </p>
-            <button className="md-empty-cta md-empty-cta--primary" onClick={() => setShowMastersys(true)}>
-              Conectar o Mastersys
-            </button>
+            {view === "local" ? (
+              <>
+                <h3>Nenhuma tarefa sua ainda</h3>
+                <p>
+                  Esta aba é só do que é seu: tarefas que você cria, com
+                  prioridade, prazo e lembretes — inclusive as que você vincula
+                  a um chamado. Os chamados atribuídos a você ficam na aba{" "}
+                  <strong>Chamados</strong>.
+                </p>
+                <button
+                  className="md-empty-cta md-empty-cta--primary"
+                  onClick={() => {
+                    setLinkSeed(null);
+                    setCreating("plain");
+                  }}
+                >
+                  Criar primeira tarefa
+                </button>
+              </>
+            ) : view === "mastersys" ? (
+              <>
+                <h3>Nenhum chamado na sua fila</h3>
+                <p>
+                  Aqui aparecem as tarefas e os chamados do Mastersys em que
+                  você é analista responsável ou atendente. Se você já conectou
+                  e ainda está vazio, pode ser que nada esteja atribuído a você
+                  — ou que tudo esteja em pós-atendimento, na aba{" "}
+                  <strong>Concluídos</strong>.
+                </p>
+                <button
+                  className="md-empty-cta md-empty-cta--primary"
+                  onClick={() => setShowMastersys(true)}
+                >
+                  Conectar o Mastersys
+                </button>
+              </>
+            ) : (
+              <>
+                <h3>Nada concluído ainda</h3>
+                <p>
+                  Aqui ficam duas coisas: o que você concluir (com as anotações
+                  e o histórico — reabrir devolve ao quadro) e os chamados que o
+                  Mastersys considera parados, como pós-atendimento e
+                  finalizado.
+                </p>
+              </>
+            )}
           </div>
-        ) : (
+        ) : view !== "completed" ? (
           <>
             <h3 className="md-eyebrow" style={{ margin: "2px 0 10px" }}>
-              Pendentes
+              {view === "local" ? "Pendentes" : "Na sua fila"}
             </h3>
             {visiblePending.length === 0 ? (
               <div className="md-quiet" style={{ marginBottom: 12 }}>
-                {pending.length === 0
-                  ? "Nenhuma tarefa pendente — bom trabalho."
-                  : "Nenhuma pendente casa com o filtro atual."}
+                {pendingOfView.length === 0
+                  ? view === "local"
+                    ? "Nenhuma tarefa pendente — bom trabalho."
+                    : "Nenhum chamado ativo na sua fila."
+                  : "Nada aqui casa com o filtro atual."}
               </div>
             ) : (
               visiblePending.map(renderTask)
             )}
+            {/* Ponte para a aba Concluídos: quem concluiu algo aqui, ou viu um
+                chamado ir para pós-atendimento, precisa saber para onde o item
+                foi — senão parece que desapareceu. */}
+            {view === "mastersys" && parkedPending.length > 0 && (
+              <p className="md-panel-note" style={{ marginTop: 18 }}>
+                {parkedPending.length} chamado(s) parado(s) na origem
+                (pós-atendimento, finalizado) na aba <strong>Concluídos</strong>.
+              </p>
+            )}
+            {view === "local" && completed.length > 0 && (
+              <p className="md-panel-note" style={{ marginTop: 18 }}>
+                {completed.length} concluída(s) na aba <strong>Concluídos</strong>.
+              </p>
+            )}
+          </>
+        ) : (
+          <>
+            {/* Duas seções, porque são dois estados diferentes: o chamado que a
+                origem parou não está concluído por você — está aguardando lá. */}
+            <h3 className="md-eyebrow" style={{ margin: "2px 0 10px" }}>
+              Aguardando na origem{" "}
+              {visibleParked.length > 0 && (
+                <span style={{ fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>
+                  · {visibleParked.length}
+                </span>
+              )}
+            </h3>
+            {visibleParked.length === 0 ? (
+              <div className="md-quiet" style={{ marginBottom: 12 }}>
+                {parkedPending.length === 0
+                  ? "Nenhum chamado em pós-atendimento ou finalizado na sua fila."
+                  : "Nenhum casa com o filtro atual."}
+              </div>
+            ) : (
+              <>
+                <p className="md-panel-note" style={{ marginTop: 0 }}>
+                  Chamados que o Mastersys considera parados. Não contam como
+                  atrasados nem geram lembrete, e voltam ao quadro de Tarefas
+                  sozinhos se o status mudar na origem.
+                </p>
+                {visibleParked.map(renderTask)}
+              </>
+            )}
+
             <h3 className="md-eyebrow" style={{ margin: "18px 0 10px" }}>
+              {/* Só "Concluídas": a lista mistura o que você concluiu aqui com
+                  espelhos que a origem fechou (`closed_at`/`resolved_at`), e
+                  dizer "por você" afirmaria autoria que não é verdade. */}
               Concluídas{" "}
               {visibleCompleted.length > 0 && (
                 <span style={{ fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>
@@ -925,7 +985,7 @@ export function TasksBoard() {
               )}
             </h3>
             {visibleCompleted.length === 0 ? (
-              <div style={{ fontSize: 13, color: "var(--text-muted)", padding: "6px 0" }}>
+              <div className="md-quiet">
                 {completed.length === 0
                   ? "Nenhuma tarefa concluída ainda."
                   : "Nenhuma concluída casa com o filtro atual."}
@@ -936,6 +996,28 @@ export function TasksBoard() {
           </>
         )}
       </div>
+
+      {creating && (
+        <TaskFormModal
+          mode={creating}
+          initialLink={linkSeed}
+          onClose={() => {
+            setCreating(null);
+            setLinkSeed(null);
+          }}
+          onCreated={() => void refresh()}
+        />
+      )}
+
+      {ticketOf && (
+        <TicketModal
+          task={ticketOf}
+          catalog={catalog}
+          parked={isParked(ticketOf)}
+          onClose={() => setTicketOf(null)}
+          onLinkChanged={() => void refresh()}
+        />
+      )}
 
       {showMastersys && (
         <MastersysPanel

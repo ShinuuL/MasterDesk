@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import type { Note } from "../types";
 import * as api from "../api";
 import { NoteCard } from "./NoteCard";
+import { NoteFormModal } from "./NoteFormModal";
 
 export function NotesBoard() {
   const [notes, setNotes] = useState<Note[]>([]);
@@ -9,9 +10,9 @@ export function NotesBoard() {
   const [filter, setFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
-  const titleRef = useRef<HTMLInputElement>(null);
+  const [creating, setCreating] = useState(false);
+  /** Devolve o foco ao botão quando o diálogo fecha (WAI-ARIA dialog). */
+  const createRef = useRef<HTMLButtonElement>(null);
   const [poppedOut, setPoppedOut] = useState<Set<string>>(new Set());
   const poppedOutRef = useRef<Set<string>>(new Set());
 
@@ -77,17 +78,11 @@ export function NotesBoard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleCreate = async () => {
-    if (!title.trim()) return;
-    try {
-      const created = await api.createNote({ title: title.trim(), content });
-      setNotes((prev) => [created, ...prev]);
-      setTitle("");
-      setContent("");
-      titleRef.current?.focus();
-    } catch (e) {
-      setError(String(e));
-    }
+  const handleCreated = (created: Note) => {
+    setNotes((prev) => [created, ...prev]);
+    // Nota nova numa lista de arquivadas não seria vista: recarrega para o
+    // quadro mostrar o que a aba atual realmente contém.
+    if (showArchived) void refresh();
   };
 
   const handleUpdate = async (id: string, patch: Record<string, unknown>) => {
@@ -217,39 +212,20 @@ export function NotesBoard() {
         </span>
       </header>
 
+      {/* A criação virou diálogo: o conteúdo da nota não caber numa linha era
+          o limite do formulário em barra (ver `NoteFormModal`). O espaço que a
+          barra ocupava em todas as telas volta para as notas. */}
       <div className="md-create-bar">
-        <div className="md-field" style={{ flex:"0 0 240px" }}>
-          <label htmlFor="note-title">Título</label>
-          <input
-            id="note-title"
-            ref={titleRef}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Título da nota"
-            maxLength={200}
-            className="md-input"
-            onKeyDown={(e)=>{ if(e.key==="Enter") handleCreate(); }}
-          />
-        </div>
-        <div className="md-field" style={{ flex:1, minWidth:180 }}>
-          <label htmlFor="note-content">Conteúdo</label>
-          <input
-            id="note-content"
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            placeholder="Conteúdo opcional — pressione Enter para criar"
-            className="md-input"
-            onKeyDown={(e)=>{ if(e.key==="Enter") handleCreate(); }}
-          />
-        </div>
         <button
-          onClick={handleCreate}
-          disabled={!title.trim()}
+          ref={createRef}
+          onClick={() => setCreating(true)}
           className="md-primary md-primary-accent"
-          aria-disabled={!title.trim()}
         >
           Nova nota
         </button>
+        <span className="md-panel-note" style={{ margin: 0 }}>
+          Título, conteúdo e cor no diálogo.
+        </span>
       </div>
 
       {error && (
@@ -284,7 +260,7 @@ export function NotesBoard() {
             showArchived={showArchived}
             hasFilter={Boolean(filter.trim())}
             onClearFilter={()=>setFilter("")}
-            onFocusCreate={()=>titleRef.current?.focus()}
+            onFocusCreate={()=>setCreating(true)}
           />
         ) : (
           <>
@@ -307,6 +283,16 @@ export function NotesBoard() {
           </>
         )}
       </div>
+
+      {creating && (
+        <NoteFormModal
+          onClose={() => {
+            setCreating(false);
+            createRef.current?.focus();
+          }}
+          onCreated={handleCreated}
+        />
+      )}
     </div>
   );
 }
@@ -351,7 +337,7 @@ function EmptyState({ showArchived, hasFilter, onClearFilter, onFocusCreate }: {
       <p>Crie a primeira nota acima. Arraste para organizar, troque a cor e ajuste a opacidade — tudo fica sobre uma mesa pontilhada.</p>
       <div style={{ display:"flex", gap:8, flexWrap:"wrap", justifyContent:"center" }}>
         <button className="md-empty-cta md-empty-cta--primary" onClick={onFocusCreate}>Criar primeira nota</button>
-        <span style={{ fontSize:12, color:"var(--text-muted)", alignSelf:"center" }}>dica: Enter cria rápido</span>
+        <span style={{ fontSize:12, color:"var(--text-muted)", alignSelf:"center" }}>dica: Ctrl+Enter salva no diálogo</span>
       </div>
     </div>
   );

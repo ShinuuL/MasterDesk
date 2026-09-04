@@ -51,6 +51,7 @@ function task(over: Partial<Task> = {}): Task {
     reminder_thresholds: [],
     completed: false,
     external: null,
+    link: null,
     created_at: "2026-09-01T10:00:00Z",
     updated_at: "2026-09-01T10:00:00Z",
     ...over,
@@ -66,6 +67,8 @@ function ext(over: Partial<ExternalRef> = {}): ExternalRef {
     ticket: "75071",
     status_label: "em_atendimento",
     status_parked: false,
+    role_analyst: false,
+    role_attendant: false,
     ...over,
   };
 }
@@ -294,5 +297,107 @@ describe("clientsInTasks", () => {
       task({ external: ext({ client: null }) }),
     ];
     expect(clientsInTasks(list)).toEqual(["Ácme", "Zeta"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Vínculo manual — a tarefa é local, mas tem chamado e cliente
+// ---------------------------------------------------------------------------
+
+/** Tarefa local vinculada a um chamado pelo próprio usuário. */
+function linked(over: Partial<Task> = {}): Task {
+  return task({
+    id: "vinc",
+    title: "trocar fonte",
+    link: { ticket: "991", client: "Padaria Central", custom_status: "aguardando peça" },
+    ...over,
+  });
+}
+
+describe("tarefa com vínculo manual", () => {
+  it("é encontrada pelo número do chamado, com ou sem #", () => {
+    expect(matchesSearch(linked(), "991")).toBe(true);
+    expect(matchesSearch(linked(), "#991")).toBe(true);
+    expect(matchesSearch(linked(), "992")).toBe(false);
+  });
+
+  it("é encontrada pelo cliente e pelo status personalizado", () => {
+    expect(matchesSearch(linked(), "padaria")).toBe(true);
+    expect(matchesSearch(linked(), "aguardando peça")).toBe(true);
+  });
+
+  it("conta como 'tem chamado' — o card mostra #991, o filtro tem de concordar", () => {
+    expect(matchesFilters(linked(), { ...EMPTY_FILTERS, hasTicket: "yes" })).toBe(true);
+    expect(matchesFilters(linked(), { ...EMPTY_FILTERS, hasTicket: "no" })).toBe(false);
+    expect(matchesFilters(linked(), { ...EMPTY_FILTERS, ticket: "991" })).toBe(true);
+    expect(matchesFilters(linked(), { ...EMPTY_FILTERS, ticket: "12" })).toBe(false);
+  });
+
+  it("continua sendo de origem local, não espelho", () => {
+    expect(matchesFilters(linked(), { ...EMPTY_FILTERS, origin: "local" })).toBe(true);
+    expect(matchesFilters(linked(), { ...EMPTY_FILTERS, origin: "mastersys" })).toBe(false);
+  });
+
+  it("sobrevive ao filtro de status do Mastersys, como qualquer local", () => {
+    // O status personalizado não pertence ao vocabulário da origem, então um
+    // recorte por status de chamado não pode escondê-la.
+    expect(matchesFilters(linked(), defaultFilters(CATALOG))).toBe(true);
+  });
+
+  it("aparece na lista de clientes do filtro", () => {
+    expect(clientsInTasks([linked(), task({ external: ext({ client: "Zeta" }) })])).toEqual([
+      "Padaria Central",
+      "Zeta",
+    ]);
+  });
+
+  it("nunca é tratada como parada — parado é estado da origem", () => {
+    expect(matchesFilters(linked(), { ...EMPTY_FILTERS, hasTicket: "yes" })).toBe(true);
+    expect(isOverdue(linked({ deadline: "2020-01-01T00:00:00Z" }))).toBe(true);
+  });
+});
+
+describe("default por aba (FilterScope)", () => {
+  it("no quadro ativo, começa com os status que a origem chama de trabalho ativo", () => {
+    expect(defaultFilters(CATALOG, "mastersys").statuses).toEqual([
+      "novo",
+      "em_atendimento",
+    ]);
+  });
+
+  it("na aba Concluídos, começa SEM recorte de status", () => {
+    // A aba já é o recorte (concluídas + parados na origem). Herdar o default
+    // do quadro ativo esconderia pós-atendimento e finalizado — exatamente o
+    // que ela existe para mostrar.
+    expect(defaultFilters(CATALOG, "done").statuses).toEqual([]);
+    expect(countActiveFilters(defaultFilters(CATALOG, "done"), CATALOG, "done")).toBe(0);
+  });
+
+  it("o mesmo filtro conta como ativo ou não conforme a aba", () => {
+    const semStatus = { ...EMPTY_FILTERS };
+    // No quadro ativo, "nenhum status marcado" é um desvio do default.
+    expect(countActiveFilters(semStatus, CATALOG, "mastersys")).toBe(1);
+    // Na aba Concluídos é o próprio default.
+    expect(countActiveFilters(semStatus, CATALOG, "done")).toBe(0);
+  });
+
+  it("um espelho em pós-atendimento passa pelo filtro da aba Concluídos", () => {
+    expect(matchesFilters(posAtendimento(), defaultFilters(CATALOG, "done"))).toBe(true);
+    // E é escondido no quadro ativo, como antes.
+    expect(matchesFilters(posAtendimento(), defaultFilters(CATALOG, "mastersys"))).toBe(false);
+  });
+});
+
+describe("escopo local (aba Tarefas)", () => {
+  it("começa sem recorte de status — não existe status de origem para recortar", () => {
+    expect(defaultFilters(CATALOG, "local").statuses).toEqual([]);
+    expect(countActiveFilters(defaultFilters(CATALOG, "local"), CATALOG, "local")).toBe(0);
+  });
+
+  it("tarefa vinculada continua sendo de origem local, e é o que a aba mostra", () => {
+    // A partição das abas é estrutural (`external === null`), mas o filtro de
+    // origem tem de concordar com ela para a aba Concluídos não mentir.
+    expect(matchesFilters(linked(), { ...EMPTY_FILTERS, origin: "local" })).toBe(true);
+    expect(matchesFilters(linked(), defaultFilters(CATALOG, "local"))).toBe(true);
   });
 });

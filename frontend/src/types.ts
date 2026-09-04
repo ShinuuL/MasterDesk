@@ -57,8 +57,24 @@ export interface Task {
   completed: boolean;
   /** Origem externa. `null` = tarefa local (o caso padrão). */
   external: ExternalRef | null;
+  /**
+   * Vínculo manual com um chamado, criado pelo usuário aqui dentro.
+   *
+   * Diferente de `external`: aqui a tarefa é local e o dono é o usuário —
+   * nenhuma sincronização a sobrescreve nem a retira do quadro. É o que
+   * permite acompanhar trabalho de um chamado sem escrever no Mastersys.
+   */
+  link: TicketLink | null;
   created_at: string;
   updated_at: string;
+}
+
+/** Vínculo manual de uma tarefa local a um chamado (item 2 das features). */
+export interface TicketLink {
+  ticket: string;
+  client: string | null;
+  /** Status escrito pelo usuário. Livre — não vem do catálogo do Mastersys. */
+  custom_status: string | null;
 }
 
 export type ReminderThreshold =
@@ -72,6 +88,7 @@ export interface CreateTaskPayload {
   priority?: Priority;
   deadline?: string;
   reminder_thresholds?: number[];
+  link?: TicketLinkPayload;
 }
 
 export interface UpdateTaskPayload {
@@ -80,6 +97,16 @@ export interface UpdateTaskPayload {
   priority?: Priority;
   deadline?: string | null;
   reminder_thresholds?: number[];
+  /** Grava/substitui o vínculo. Ausente = não mexe. */
+  link?: TicketLinkPayload;
+  /** Remove o vínculo. Flag explícita para não confundir com "ausente". */
+  unlink?: boolean;
+}
+
+export interface TicketLinkPayload {
+  ticket: string;
+  client?: string | null;
+  custom_status?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,6 +168,17 @@ export interface ExternalRef {
    * a partir do catálogo de status (`MastersysTicketStatus.is_parked`).
    */
   status_parked: boolean;
+  /**
+   * O usuário é o **analista responsável** do item na origem (`assigned_to`).
+   *
+   * Os dois papéis podem ser verdadeiros (abri e sou o responsável) e os dois
+   * podem ser falsos — nesse caso a origem não informou papel para este item,
+   * o que é diferente de dizer que o usuário não tem papel nenhum. A UI então
+   * não mostra papel, em vez de afirmar algo que não sabe.
+   */
+  role_analyst: boolean;
+  /** O usuário é o **atendente** do item na origem (`created_by`). */
+  role_attendant: boolean;
 }
 
 /**

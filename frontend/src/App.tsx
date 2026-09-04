@@ -8,7 +8,23 @@ import { ThemeToggle } from "./components/ThemeToggle";
 import type { AuthPayload, Note } from "./types";
 import * as api from "./api";
 
-type Tab = "notes" | "tasks";
+/**
+ * As quatro seções: **Notas | Tarefas | Chamados | Concluídos**.
+ *
+ * `tasks` é só o que é do usuário (`external === null`) e `tickets` é a fila
+ * espelhada do Mastersys. Antes os dois dividiam um quadro só, e a mistura
+ * cobrava caro: o trabalho próprio ficava soterrado por dezenas de chamados, e
+ * as duas metades têm regras opostas — o espelho é sobrescrito e retirado pela
+ * sincronização, a tarefa local é sua e ninguém a toca.
+ *
+ * `done` reúne o que saiu do trabalho ativo das duas origens: concluídas e
+ * chamados que a origem considera parados (pós-atendimento, finalizado).
+ *
+ * Notas arquivadas continuam na aba Notas, no interruptor "Arquivadas":
+ * arquivar não é concluir, e juntar as duas coisas misturaria "terminei isto"
+ * com "saiu da mesa".
+ */
+type Tab = "notes" | "tasks" | "tickets" | "done";
 
 /**
  * Espera antes de gravar a geometria de um pop-out, em ms.
@@ -426,6 +442,28 @@ function MainApp() {
           >
             Tarefas
           </button>
+          <button
+            role="tab"
+            aria-selected={tab === "tickets"}
+            aria-controls="panel-tickets"
+            id="tab-tickets"
+            onClick={() => setTab("tickets")}
+            className="md-tab"
+            title="Tarefas e chamados atribuídos a você no Mastersys"
+          >
+            Chamados
+          </button>
+          <button
+            role="tab"
+            aria-selected={tab === "done"}
+            aria-controls="panel-done"
+            id="tab-done"
+            onClick={() => setTab("done")}
+            className="md-tab"
+            title="Tarefas concluídas"
+          >
+            Concluídos
+          </button>
         </div>
 
         <div className="md-nav-right">
@@ -451,9 +489,19 @@ function MainApp() {
           <div role="tabpanel" id="panel-notes" aria-labelledby="tab-notes" style={{ display:"flex", flexDirection:"column", flex:1, minHeight:0 }}>
             <NotesBoard />
           </div>
-        ) : (
+        ) : tab === "tasks" ? (
           <div role="tabpanel" id="panel-tasks" aria-labelledby="tab-tasks" style={{ display:"flex", flexDirection:"column", flex:1, minHeight:0 }}>
-            <TasksBoard />
+            {/* Mesmo componente nas três abas, recortes diferentes — a prop
+                `view` documenta o que cada uma contém. */}
+            <TasksBoard view="local" />
+          </div>
+        ) : tab === "tickets" ? (
+          <div role="tabpanel" id="panel-tickets" aria-labelledby="tab-tickets" style={{ display:"flex", flexDirection:"column", flex:1, minHeight:0 }}>
+            <TasksBoard view="mastersys" />
+          </div>
+        ) : (
+          <div role="tabpanel" id="panel-done" aria-labelledby="tab-done" style={{ display:"flex", flexDirection:"column", flex:1, minHeight:0 }}>
+            <TasksBoard view="completed" />
           </div>
         )}
       </div>
