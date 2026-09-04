@@ -52,6 +52,11 @@ impl TaskNoteService {
         self.note_repo.count_by_task(task_id).await
     }
 
+    /// Contador de todas as tarefas de uma vez — o que o quadro usa.
+    pub async fn count_notes_by_task(&self) -> DomainResult<Vec<(TaskId, u32)>> {
+        self.note_repo.counts_by_task().await
+    }
+
     pub async fn update_note(
         &self,
         id: TaskNoteId,
@@ -180,6 +185,13 @@ mod tests {
         async fn delete(&self, id: TaskNoteId) -> DomainResult<()> {
             self.items.lock().unwrap().retain(|n| n.id != id);
             Ok(())
+        }
+        async fn counts_by_task(&self) -> DomainResult<Vec<(TaskId, u32)>> {
+            let mut acc: HashMap<TaskId, u32> = HashMap::new();
+            for n in self.items.lock().unwrap().iter() {
+                *acc.entry(n.task_id).or_insert(0) += 1;
+            }
+            Ok(acc.into_iter().collect())
         }
         async fn delete_by_task(&self, task_id: TaskId) -> DomainResult<()> {
             self.items.lock().unwrap().retain(|n| n.task_id != task_id);

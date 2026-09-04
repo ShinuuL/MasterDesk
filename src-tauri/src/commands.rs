@@ -1046,6 +1046,27 @@ pub async fn count_task_notes(state: State<'_, AppState>, task_id: String) -> Re
         .map_err(|e| e.to_string())
 }
 
+/// Contador de anotações de **todas** as tarefas, numa chamada só.
+///
+/// O quadro mostra o número em cada card. Antes ele perguntava tarefa por
+/// tarefa: numa fila de algumas centenas de chamados isso eram centenas de
+/// travessias de IPC e de consultas SQLite a cada recarga do quadro — e o
+/// quadro recarrega a cada sincronização. Chave é o id da tarefa em texto,
+/// porque é assim que o frontend a identifica; tarefa sem anotação não vem, e
+/// quem chama trata ausência como zero.
+#[tauri::command]
+pub async fn count_all_task_notes(
+    state: State<'_, AppState>,
+) -> Result<std::collections::HashMap<String, u32>, String> {
+    Ok(task_note_service(&state)
+        .count_notes_by_task()
+        .await
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|(id, n)| (id.to_string(), n))
+        .collect())
+}
+
 #[tauri::command]
 pub async fn update_task_note(
     state: State<'_, AppState>,

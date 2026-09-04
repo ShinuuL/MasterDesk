@@ -44,9 +44,30 @@ const DEFAULT_POLL_SECS: u64 = 300;
 /// sincronização e passa a ser carga.
 const MIN_POLL_SECS: u64 = 60;
 
-/// Distância mínima entre duas sincronizações, independente de quantos
-/// gatilhos cheguem. É o que protege o servidor das salas globais.
+/// Distância mínima entre duas sincronizações pedidas **pelo usuário ou pelo
+/// app** (`Requested`). Curta de propósito: quem clicou espera resposta.
 const MIN_SYNC_GAP: Duration = Duration::from_secs(15);
+
+/// Distância mínima quando o gatilho vem do canal de **tempo real**.
+///
+/// ## Por que este é maior que o `MIN_SYNC_GAP`
+///
+/// As salas `tasks`/`tickets` do Mastersys são globais: chega evento de todo
+/// mundo da empresa. A esmagadora maioria não tem nada a ver com a fila deste
+/// usuário — o gatilho não sabe distinguir, e não deve (ver o cabeçalho de
+/// `mastersys_realtime`). Então, num expediente movimentado, o piso de 15 s
+/// virava o intervalo *efetivo* de sincronização.
+///
+/// E cada sincronização não é barata: busca as tarefas do usuário mais até duas
+/// séries de páginas de 200 chamados, cada chamado com a `description` inteira.
+/// São alguns MB de JSON para parsear, quase sempre para concluir que nada
+/// mudou.
+///
+/// 60 s ainda é **cinco vezes** melhor que o polling padrão (300 s), que é o
+/// piso de latência que o app promete quando o canal não conecta. A troca é
+/// explícita: até um minuto de atraso para ver um chamado novo, em vez de
+/// gastar CPU e rede a cada 15 s por causa do movimento de outras pessoas.
+const MIN_REALTIME_SYNC_GAP: Duration = Duration::from_secs(60);
 
 /// Janela de coalescência: depois do primeiro gatilho, espera um pouco para
 /// juntar os que vierem atrás. Um chamado editado no Mastersys costuma emitir
@@ -223,13 +244,33 @@ pub fn spawn(
                 while rx.try_recv().is_ok() {}
             }
 
-            // Intervalo mínimo. O pedido é DESCARTADO em vez de enfileirado:
-            // se algo aconteceu 3 segundos depois do último sync, o próximo
-            // ciclo do timer o pega. Enfileirar viraria uma fila infinita sob
-            // as salas globais do Mastersys.
+            // Intervalo mínimo, por origem do gatilho — tempo real é o barulho
+            // das salas globais e paga o piso maior.
+            //
+            // `Timer` não tem piso: ele já É o intervalo configurado, e o piso
+            // desse intervalo é `MIN_POLL_SECS` (60 s).
+            let gap = match trigger {
+                SyncTrigger::Timer => Duration::ZERO,
+                SyncTrigger::Realtime => MIN_REALTIME_SYNC_GAP,
+                SyncTrigger::Requested => MIN_SYNC_GAP,
+            };
+
+            // O gatilho cedo demais é ADIADO, não descartado.
+            //
+            // Descartar era o comportamento anterior, e é errado justamente no
+            // caso esparso: o único evento do seu chamado chega 3 segundos
+            // depois do último sync, é jogado fora, e a mudança só aparece no
+            // próximo ciclo do timer — até 5 minutos depois. Adiar custa uma
+            // espera limitada pelo próprio piso e não perde nada.
+            //
+            // Não vira fila: o canal tem capacidade 1, então há no máximo um
+            // gatilho pendente, e o `try_recv` abaixo drena o que chegou
+            // durante a espera para que todos sejam atendidos por este ciclo.
             if let Some(prev) = last_sync {
-                if prev.elapsed() < MIN_SYNC_GAP {
-                    continue;
+                let elapsed = prev.elapsed();
+                if elapsed < gap {
+                    tokio::time::sleep(gap - elapsed).await;
+                    while rx.try_recv().is_ok() {}
                 }
             }
 
@@ -313,6 +354,14 @@ mod tests {
         // Um padrão abaixo do próprio piso seria silenciosamente elevado por
         // `poll_interval`, e o valor escrito aqui viraria mentira.
         assert!(DEFAULT_POLL_SECS >= MIN_POLL_SECS);
+        // O piso do tempo real existe para ser MAIOR que o de um pedido
+        // explícito: é ele que absorve o barulho das salas globais. Igualar os
+        // dois desfaz o recurso sem nenhum sinal.
+        assert!(MIN_REALTIME_SYNC_GAP.as_millis() > MIN_SYNC_GAP.as_millis());
+        // E precisa ficar abaixo do polling padrão: acima dele, o canal de
+        // tempo real passaria a ATRASAR o que o timer já traria — deixaria de
+        // ser aceleração, que é a premissa da ADR-010.
+        assert!(MIN_REALTIME_SYNC_GAP.as_secs() < DEFAULT_POLL_SECS);
     };
 
     #[tokio::test]

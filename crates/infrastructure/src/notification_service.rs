@@ -10,8 +10,22 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use masterdesk_domain::{DomainError, DomainResult, TaskId};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
+
+/// Teto do log de depuração.
+///
+/// O log existe para inspeção e teste — **nada em produção o lê**. Sem teto ele
+/// crescia para sempre: cada rodada de sincronização chama
+/// `cancel_reminder` + `schedule_reminder` por espelho tocado, e o app fica
+/// aberto o dia inteiro recebendo eventos das salas globais do Mastersys. Numa
+/// fila de algumas centenas de chamados isso são centenas de `String` por
+/// ciclo, acumuladas até o app fechar — memória que só cresce, e realocação de
+/// um `Vec` cada vez maior junto.
+///
+/// 500 entradas cobrem o que se olha ao depurar (as últimas ações) e custam
+/// alguns kilobytes fixos.
+const LOG_CAPACITY: usize = 500;
 
 /// Um agendamento de lembrete em memória.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,7 +40,10 @@ pub struct NotificationService {
     /// task_id -> agendamento atual (um por task nesta fase).
     schedules: Mutex<HashMap<TaskId, ScheduledReminder>>,
     /// Log simples de disparos/eventos para depuração e teste.
-    log: Mutex<Vec<String>>,
+    ///
+    /// Janela deslizante das últimas [`LOG_CAPACITY`] entradas — ver o
+    /// comentário da constante para o porquê do teto.
+    log: Mutex<VecDeque<String>>,
 }
 
 impl Default for NotificationService {
@@ -39,7 +56,7 @@ impl NotificationService {
     pub fn new() -> Self {
         Self {
             schedules: Mutex::new(HashMap::new()),
-            log: Mutex::new(Vec::new()),
+            log: Mutex::new(VecDeque::with_capacity(LOG_CAPACITY)),
         }
     }
 
@@ -48,9 +65,19 @@ impl NotificationService {
         self.schedules.lock().unwrap().values().cloned().collect()
     }
 
-    /// Log de eventos (para depuração e testes).
+    /// Log de eventos (para depuração e testes), mais antigo primeiro.
     pub fn log(&self) -> Vec<String> {
-        self.log.lock().unwrap().clone()
+        self.log.lock().unwrap().iter().cloned().collect()
+    }
+
+    /// Registra no log respeitando o teto: entrada nova entra no fim, a mais
+    /// velha sai da frente.
+    fn push_log(&self, entry: String) {
+        let mut log = self.log.lock().unwrap();
+        if log.len() >= LOG_CAPACITY {
+            log.pop_front();
+        }
+        log.push_back(entry);
     }
 
     /// Dispara (logado) um lembrete cujo fire_at já chegou.
@@ -65,10 +92,7 @@ impl NotificationService {
             .cloned()
             .collect();
         for r in due {
-            self.log
-                .lock()
-                .unwrap()
-                .push(format!("fire task {} at {}", r.task_id, r.fire_at));
+            self.push_log(format!("fire task {} at {}", r.task_id, r.fire_at));
         }
     }
 }
@@ -85,19 +109,16 @@ impl masterdesk_domain::ports::NotificationService for NotificationService {
         let mut schedules = self.schedules.lock().unwrap();
         // Uma task tem um único "next" reminder agendado por vez.
         schedules.insert(task_id, ScheduledReminder { task_id, fire_at });
-        self.log
-            .lock()
-            .unwrap()
-            .push(format!("scheduled task {} at {}", task_id, fire_at));
+        // Fora do `schedules.lock()`? Não: `push_log` tem mutex próprio, e
+        // pegar os dois na mesma ordem em todo lugar é o que evita deadlock.
+        drop(schedules);
+        self.push_log(format!("scheduled task {task_id} at {fire_at}"));
         Ok(())
     }
 
     async fn cancel_reminder(&self, task_id: TaskId) -> DomainResult<()> {
         self.schedules.lock().unwrap().remove(&task_id);
-        self.log
-            .lock()
-            .unwrap()
-            .push(format!("cancelled task {task_id}"));
+        self.push_log(format!("cancelled task {task_id}"));
         Ok(())
     }
 
@@ -115,10 +136,8 @@ impl masterdesk_domain::ports::NotificationService for NotificationService {
                 fire_at: new_fire_at,
             },
         );
-        self.log
-            .lock()
-            .unwrap()
-            .push(format!("snoozed task {task_id} by {minutes} min"));
+        drop(schedules);
+        self.push_log(format!("snoozed task {task_id} by {minutes} min"));
         Ok(())
     }
 }
@@ -168,6 +187,21 @@ mod tests {
         let ns = NotificationService::new();
         let res = ns.snooze(uuid::Uuid::new_v4(), 0).await;
         assert!(matches!(res, Err(DomainError::Validation(_))));
+    }
+
+    #[tokio::test]
+    async fn log_does_not_grow_without_bound() {
+        let ns = NotificationService::new();
+        let task = TaskId::new_v4();
+        // O padrão real da sincronização: cancelar e reagendar, muitas vezes.
+        // Sem teto isto acumulava uma `String` por chamada até o app fechar.
+        for _ in 0..(LOG_CAPACITY * 3) {
+            ns.cancel_reminder(task).await.unwrap();
+        }
+        assert_eq!(ns.log().len(), LOG_CAPACITY);
+        // E o que sobra são as ÚLTIMAS entradas, não as primeiras: ao depurar
+        // se quer saber o que acabou de acontecer.
+        assert!(ns.log().last().unwrap().contains("cancelled"));
     }
 
     #[test]

@@ -188,8 +188,47 @@ export function matchesSearch(task: Task, rawTerm: string): boolean {
   ].some((f) => f.toLowerCase().includes(term));
 }
 
-/** Aplica um estado de filtro a uma tarefa. */
-export function matchesFilters(task: Task, filters: TaskFilterState): boolean {
+/**
+ * O recorte de status pode decidir sobre este status?
+ *
+ * Só quando o catálogo da origem o conhece. Um status fora do catálogo é dado
+ * que o MasterDesk não sabe classificar, e o default do quadro de Chamados é
+ * montado **exclusivamente** com slugs do catálogo (ver [`defaultFilters`]) —
+ * então recortar por ele esconderia o item em todas as abas de uma vez:
+ * Chamados o corta no filtro, Concluídos só mostra concluído ou parado, e
+ * Tarefas só mostra `external === null`. O trabalho desaparecia do app sem que
+ * nada na tela explicasse por quê.
+ *
+ * O CASO CONCRETO (chamado 75249, 2026-09-04)
+ * Chamado "Em Desenvolvimento" com tarefa no quadro do Mastersys. O espelho vem
+ * da tarefa, e `MastersysTask::effective_status` só consegue usar o status do
+ * chamado se a origem enviar `ticketStatus` — campo acrescentado ao `TaskDTO`
+ * em 2026-09-03 e ainda não publicado em produção. Sem ele o espelho cai no
+ * status da TAREFA (`in_progress`), que não existe em `ticket_statuses`, e o
+ * chamado sumia do quadro inteiro.
+ *
+ * Sem `knownStatuses` (chamada que não tem o catálogo em mão) o recorte vale
+ * para tudo, que é o comportamento anterior.
+ */
+function isStatusFilterable(
+  status: string,
+  knownStatuses?: readonly string[],
+): boolean {
+  return knownStatuses === undefined || knownStatuses.includes(status);
+}
+
+/**
+ * Aplica um estado de filtro a uma tarefa.
+ *
+ * `knownStatuses` são os slugs que o catálogo da origem conhece. Quando
+ * informado, um espelho cujo status **não** está no catálogo escapa do recorte
+ * de status — ver [`isStatusFilterable`].
+ */
+export function matchesFilters(
+  task: Task,
+  filters: TaskFilterState,
+  knownStatuses?: readonly string[],
+): boolean {
   const ext = task.external;
 
   if (filters.origin === "local" && ext !== null) return false;
@@ -200,7 +239,12 @@ export function matchesFilters(task: Task, filters: TaskFilterState): boolean {
     // status porque o filtro é sobre o vocabulário do Mastersys — esconder as
     // locais aqui seria efeito colateral, não intenção. Isso importa em
     // Concluídos, a lista onde locais e espelhos convivem.
-    if (ext !== null && !filters.statuses.includes(ext.status_label ?? "")) {
+    const status = ext?.status_label ?? "";
+    if (
+      ext !== null &&
+      isStatusFilterable(status, knownStatuses) &&
+      !filters.statuses.includes(status)
+    ) {
       return false;
     }
   }
@@ -249,9 +293,10 @@ export function applyTaskFilters(
   tasks: Task[],
   filters: TaskFilterState,
   search: string,
+  knownStatuses?: readonly string[],
 ): Task[] {
   return tasks.filter(
-    (t) => matchesFilters(t, filters) && matchesSearch(t, search),
+    (t) => matchesFilters(t, filters, knownStatuses) && matchesSearch(t, search),
   );
 }
 
