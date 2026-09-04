@@ -96,6 +96,22 @@ pub struct ExternalRef {
     /// deixa `false`, e o comportamento é o de antes.
     #[serde(default)]
     pub status_parked: bool,
+    /// O usuário é o **analista responsável** pelo item na origem.
+    ///
+    /// Existe porque a fila de uma pessoa no suporte tem dois papéis
+    /// diferentes, e o card precisa dizer qual: no Mastersys `assigned_to` é o
+    /// analista responsável e `created_by` é o atendente — quem abriu/assumiu o
+    /// chamado (verificado em `TicketRepository.ts`, filtro `attendantId`).
+    ///
+    /// Os dois podem ser verdadeiros ao mesmo tempo (abri e sou o responsável),
+    /// e os dois podem ser falsos: uma tarefa atribuída a mim cujo chamado é de
+    /// outra dupla não diz nada sobre papel, e nesse caso o app não afirma nada
+    /// em vez de inventar um papel.
+    #[serde(default)]
+    pub role_analyst: bool,
+    /// O usuário é o **atendente** do item na origem (`created_by`).
+    #[serde(default)]
+    pub role_attendant: bool,
 }
 
 impl ExternalRef {
@@ -123,6 +139,8 @@ impl ExternalRef {
             ticket: None,
             status_label: None,
             status_parked: false,
+            role_analyst: false,
+            role_attendant: false,
         })
     }
 
@@ -143,6 +161,17 @@ impl ExternalRef {
 
     pub fn with_status_parked(mut self, parked: bool) -> Self {
         self.status_parked = parked;
+        self
+    }
+
+    /// Papéis do usuário neste item, como a origem os enxerga.
+    ///
+    /// Um só método para os dois porque eles são decididos juntos, na mesma
+    /// resposta da origem — separar convidaria a gravar só metade e exibir
+    /// "atendente" num item onde o analista simplesmente não foi consultado.
+    pub fn with_roles(mut self, analyst: bool, attendant: bool) -> Self {
+        self.role_analyst = analyst;
+        self.role_attendant = attendant;
         self
     }
 
@@ -258,6 +287,22 @@ mod tests {
         assert_eq!(r.ticket.as_deref(), Some("991"));
         assert_eq!(r.status_label, None);
         assert_eq!(r.dedup_key(), "mastersys:10");
+    }
+
+    #[test]
+    fn roles_default_to_unknown_and_can_be_both() {
+        let r = ExternalRef::new(ExternalSystem::Mastersys, ExternalKind::Ticket, "10").unwrap();
+        assert!(
+            !r.role_analyst && !r.role_attendant,
+            "sem informação da origem o app não afirma papel nenhum"
+        );
+
+        let both = r.clone().with_roles(true, true);
+        assert!(both.role_analyst && both.role_attendant);
+
+        let only_attendant = r.with_roles(false, true);
+        assert!(!only_attendant.role_analyst);
+        assert!(only_attendant.role_attendant);
     }
 
     #[test]

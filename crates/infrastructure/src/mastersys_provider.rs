@@ -286,7 +286,55 @@ impl MastersysProvider {
     /// chamado aberto mais antigo que a janela não aparece; aceitável porque a
     /// fila de trabalho real são as tarefas, e este ramo só cobre chamados que
     /// ainda não têm tarefa no quadro.
-    async fn fetch_tickets(&self, base: &str, user_id: &str) -> DomainResult<Vec<MastersysTicket>> {
+    /// Chamados do usuário nos **dois papéis**, já com o papel resolvido.
+    ///
+    /// No Mastersys `assigned_to` é o Analista Responsável e `created_by` é o
+    /// Atendente — quem abriu/assumiu o chamado (a própria origem documenta
+    /// isso no filtro `attendantId` de `TicketRepository.ts`). Os filtros da
+    /// listagem são combinados com AND, então não existe uma chamada só que
+    /// diga "sou um ou outro": são duas, unidas por id aqui.
+    ///
+    /// ## Por que o papel é recalculado sobre a resposta
+    ///
+    /// Seria mais curto confiar em "veio da chamada X, então o papel é X". Mas
+    /// um Mastersys anterior ao filtro `attendantId` **ignora** o parâmetro
+    /// desconhecido (o schema zod descarta chaves que não conhece) e devolve
+    /// todos os chamados da janela. Confiar na origem da chamada encheria o
+    /// quadro com chamados de outras pessoas rotulados "Atendente".
+    ///
+    /// Como `TicketDTO` traz `assignedTo` e `createdBy`, o papel é derivado do
+    /// próprio chamado e quem não tem papel nenhum é descartado. Contra uma
+    /// instalação antiga o resultado é o correto, só mais caro.
+    async fn fetch_tickets_with_roles(
+        &self,
+        base: &str,
+        user_id: &str,
+    ) -> DomainResult<Vec<(MastersysTicket, TicketRoles)>> {
+        let mut by_id: std::collections::HashMap<i64, MastersysTicket> =
+            std::collections::HashMap::new();
+
+        for param in ["assignedTo", "attendantId"] {
+            for ticket in self.fetch_tickets_by(base, param, user_id).await? {
+                by_id.entry(ticket.id).or_insert(ticket);
+            }
+        }
+
+        let mut out = Vec::with_capacity(by_id.len());
+        for ticket in by_id.into_values() {
+            let roles = ticket.roles_for(user_id);
+            if roles.any() {
+                out.push((ticket, roles));
+            }
+        }
+        Ok(out)
+    }
+
+    async fn fetch_tickets_by(
+        &self,
+        base: &str,
+        filter_param: &str,
+        user_id: &str,
+    ) -> DomainResult<Vec<MastersysTicket>> {
         let window = self.ticket_window_days().await?;
         // `created_at >= ?` no servidor; data-só basta e evita depender do
         // fuso do backend para o recorte.
@@ -297,7 +345,7 @@ impl MastersysProvider {
         let mut all: Vec<MastersysTicket> = Vec::new();
         for page in 1..=TICKET_MAX_PAGES {
             let path = format!(
-                "/api/tickets/paginated?assignedTo={user_id}&createdAtStart={since}&page={page}&pageSize={TICKET_PAGE_SIZE}"
+                "/api/tickets/paginated?{filter_param}={user_id}&createdAtStart={since}&page={page}&pageSize={TICKET_PAGE_SIZE}"
             );
             let page_response: Paginated<Vec<MastersysTicket>> =
                 parse_json(self.authed_get(base, &path).await?).await?;
@@ -389,10 +437,18 @@ impl MastersysProvider {
             .into_iter()
             .collect();
 
+        // O papel também vale na busca: quem procura um chamado quer saber se
+        // já é responsável ou atendente dele. Sem identidade guardada nenhum
+        // papel é afirmado.
+        let me = self.stored_identity().await?.map(|i| i.user_id);
+
         envelope
             .data
             .iter()
-            .map(|t| t.to_work_item(&parked))
+            .map(|t| {
+                let roles = me.as_deref().map(|id| t.roles_for(id)).unwrap_or_default();
+                t.to_work_item(&parked, roles)
+            })
             .collect()
     }
 
@@ -533,24 +589,35 @@ impl SupportSystemProvider for MastersysProvider {
         //    padrão — não pode derrubar a sincronização do trabalho em si.
         let parked = self.refresh_status_catalog(&base).await;
 
+        // 3) Chamados do usuário nos dois papéis (analista e atendente).
+        //    Buscados antes de montar os itens porque é deles que sai o papel
+        //    das tarefas do passo 1 — `TaskDTO` não traz o analista nem o
+        //    atendente do chamado, só o dono da tarefa.
+        let tickets = self.fetch_tickets_with_roles(&base, &user_id).await?;
+        let roles_by_ticket: std::collections::HashMap<i64, TicketRoles> =
+            tickets.iter().map(|(t, r)| (t.id, *r)).collect();
+
         let mut items: Vec<ExternalWorkItem> = Vec::with_capacity(tasks.len());
         let mut ticket_ids_with_task: Vec<i64> = Vec::new();
         for task in &tasks {
+            let roles = task
+                .ticket_id
+                .and_then(|id| roles_by_ticket.get(&id).copied())
+                .unwrap_or_default();
             if let Some(ticket_id) = task.ticket_id {
                 ticket_ids_with_task.push(ticket_id);
             }
-            items.push(task.to_work_item(&parked)?);
+            items.push(task.to_work_item(&parked, roles)?);
         }
 
-        // 3) Chamados atribuídos ao usuário que ainda NÃO têm tarefa no quadro.
-        //    Sem esse filtro o mesmo chamado apareceria duas vezes no
-        //    MasterNote (uma como tarefa, outra como chamado).
-        let tickets = self.fetch_tickets(&base, &user_id).await?;
-        for ticket in tickets {
+        // 4) Os chamados que ainda NÃO têm tarefa no quadro. Sem esse filtro o
+        //    mesmo chamado apareceria duas vezes no MasterNote (uma como
+        //    tarefa, outra como chamado).
+        for (ticket, roles) in tickets {
             if ticket_ids_with_task.contains(&ticket.id) {
                 continue;
             }
-            items.push(ticket.to_work_item(&parked)?);
+            items.push(ticket.to_work_item(&parked, roles)?);
         }
 
         Ok(items)
@@ -752,7 +819,15 @@ impl MastersysTask {
             .unwrap_or(&self.status)
     }
 
-    fn to_work_item(&self, parked: &ParkedStatuses) -> DomainResult<ExternalWorkItem> {
+    /// `roles` vem do chamado vinculado, quando ele estiver entre os que o
+    /// usuário pode ver como analista ou atendente. Tarefa sem chamado, ou com
+    /// chamado de outra dupla, recebe `TicketRoles::default()` — nenhum papel
+    /// afirmado, que é diferente de afirmar que não tem papel.
+    fn to_work_item(
+        &self,
+        parked: &ParkedStatuses,
+        roles: TicketRoles,
+    ) -> DomainResult<ExternalWorkItem> {
         // Tarefa vinculada a chamado é apresentada como chamado — é assim que
         // o atendente pensa nela, e é o mesmo critério do `note_kind` usado
         // pela integração já existente do Mastersys.
@@ -788,7 +863,8 @@ impl MastersysTask {
         // Sem chamado vinculado (ou contra um Mastersys anterior a esta
         // mudança) volta ao status da tarefa, que é o comportamento antigo.
         .with_status_label(Some(self.effective_status().to_string()))
-        .with_status_parked(parked.contains(self.effective_status()));
+        .with_status_parked(parked.contains(self.effective_status()))
+        .with_roles(roles.analyst, roles.attendant);
 
         let mut item = ExternalWorkItem::new(reference, &self.title)?;
         item.description = self.description.clone();
@@ -807,6 +883,21 @@ impl MastersysTask {
         // NoteDesk do Mastersys dá (vai para a lixeira).
         item.removed = self.status == "canceled";
         Ok(item)
+    }
+}
+
+/// Papéis do usuário num chamado. `analyst` e `attendant` podem ser ambos
+/// verdadeiros (abri o chamado e sou o responsável) e ambos falsos — o último
+/// caso significa "este chamado não é meu em nenhum dos dois papéis".
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct TicketRoles {
+    analyst: bool,
+    attendant: bool,
+}
+
+impl TicketRoles {
+    fn any(&self) -> bool {
+        self.analyst || self.attendant
     }
 }
 
@@ -830,10 +921,33 @@ struct MastersysTicket {
     resolved_at: Option<DateTime<Utc>>,
     #[serde(default)]
     closed_at: Option<DateTime<Utc>>,
+    /// Analista responsável (`assigned_to`). `Option` porque chamado sem
+    /// responsável existe.
+    #[serde(default)]
+    assigned_to: Option<i64>,
+    /// Atendente — quem abriu/assumiu (`created_by`).
+    #[serde(default)]
+    created_by: Option<i64>,
 }
 
 impl MastersysTicket {
-    fn to_work_item(&self, parked: &ParkedStatuses) -> DomainResult<ExternalWorkItem> {
+    /// Papéis do usuário neste chamado, decididos pelos campos do próprio
+    /// chamado. Comparação por texto para não depender do formato do id (a
+    /// identidade guardada é `String`; o Mastersys usa inteiro hoje).
+    fn roles_for(&self, user_id: &str) -> TicketRoles {
+        let matches =
+            |field: Option<i64>| field.map(|v| v.to_string()) == Some(user_id.to_string());
+        TicketRoles {
+            analyst: matches(self.assigned_to),
+            attendant: matches(self.created_by),
+        }
+    }
+
+    fn to_work_item(
+        &self,
+        parked: &ParkedStatuses,
+        roles: TicketRoles,
+    ) -> DomainResult<ExternalWorkItem> {
         let reference = ExternalRef::new(
             ExternalSystem::Mastersys,
             ExternalKind::Ticket,
@@ -845,7 +959,8 @@ impl MastersysTicket {
         // É aqui que `pos_atendimento` deixa de constar como atrasado: o
         // status vem de `ticket_statuses`, o mesmo cadastro que alimenta o
         // catálogo.
-        .with_status_parked(parked.contains(&self.status));
+        .with_status_parked(parked.contains(&self.status))
+        .with_roles(roles.analyst, roles.attendant);
 
         let mut item = ExternalWorkItem::new(reference, &self.title)?;
         item.description = self.description.clone();
@@ -1119,7 +1234,9 @@ mod tests {
             "updatedAt": "2026-09-01T10:00:00.000Z"
         }"#;
         let task: MastersysTask = serde_json::from_str(json).unwrap();
-        let item = task.to_work_item(&ParkedStatuses::default()).unwrap();
+        let item = task
+            .to_work_item(&ParkedStatuses::default(), TicketRoles::default())
+            .unwrap();
 
         assert_eq!(item.reference.kind, ExternalKind::Task);
         assert_eq!(item.reference.external_id, "task-12");
@@ -1148,7 +1265,9 @@ mod tests {
             "updatedAt": "2026-09-01T10:00:00.000Z"
         }"#;
         let item: MastersysTask = serde_json::from_str(json).unwrap();
-        let item = item.to_work_item(&ParkedStatuses::default()).unwrap();
+        let item = item
+            .to_work_item(&ParkedStatuses::default(), TicketRoles::default())
+            .unwrap();
 
         assert_eq!(item.reference.kind, ExternalKind::Ticket);
         assert_eq!(item.reference.external_id, "task-30");
@@ -1168,7 +1287,7 @@ mod tests {
             );
             serde_json::from_str::<MastersysTask>(&json)
                 .unwrap()
-                .to_work_item(&ParkedStatuses::default())
+                .to_work_item(&ParkedStatuses::default(), TicketRoles::default())
                 .unwrap()
         };
 
@@ -1185,6 +1304,66 @@ mod tests {
     }
 
     #[test]
+    fn roles_come_from_the_tickets_own_fields() {
+        // `assignedTo` = Analista Responsável, `createdBy` = Atendente.
+        let json = r#"{
+            "id": 7,
+            "title": "chamado",
+            "status": "em_atendimento",
+            "assignedTo": 12,
+            "createdBy": 40
+        }"#;
+        let ticket: MastersysTicket = serde_json::from_str(json).unwrap();
+
+        assert_eq!(
+            ticket.roles_for("12"),
+            TicketRoles {
+                analyst: true,
+                attendant: false
+            }
+        );
+        assert_eq!(
+            ticket.roles_for("40"),
+            TicketRoles {
+                analyst: false,
+                attendant: true
+            }
+        );
+        assert!(
+            !ticket.roles_for("99").any(),
+            "quem não é analista nem atendente não tem papel — e o item é descartado"
+        );
+    }
+
+    #[test]
+    fn the_same_person_can_be_analyst_and_attendant() {
+        let json = r#"{
+            "id": 8,
+            "title": "abri e assumi",
+            "status": "em_analise",
+            "assignedTo": 12,
+            "createdBy": 12
+        }"#;
+        let ticket: MastersysTicket = serde_json::from_str(json).unwrap();
+        let roles = ticket.roles_for("12");
+        assert!(roles.analyst && roles.attendant);
+
+        let item = ticket
+            .to_work_item(&ParkedStatuses::default(), roles)
+            .unwrap();
+        assert!(item.reference.role_analyst && item.reference.role_attendant);
+    }
+
+    #[test]
+    fn a_ticket_without_role_fields_asserts_no_role() {
+        // Instalação do Mastersys que não devolva os campos: nada é afirmado,
+        // e o comportamento é o de antes deste recurso.
+        let json = r#"{ "id": 9, "title": "sem campos", "status": "pendente" }"#;
+        let ticket: MastersysTicket = serde_json::from_str(json).unwrap();
+        assert!(!ticket.roles_for("12").any());
+    }
+
+    #[test]
     fn ticket_is_translated_with_priority_and_forecast() {
         let json = r#"{
             "id": 4821,
@@ -1198,7 +1377,9 @@ mod tests {
             "closedAt": null
         }"#;
         let ticket: MastersysTicket = serde_json::from_str(json).unwrap();
-        let item = ticket.to_work_item(&ParkedStatuses::default()).unwrap();
+        let item = ticket
+            .to_work_item(&ParkedStatuses::default(), TicketRoles::default())
+            .unwrap();
 
         assert_eq!(item.reference.external_id, "ticket-4821");
         assert_eq!(item.reference.kind, ExternalKind::Ticket);
@@ -1225,7 +1406,7 @@ mod tests {
         }"#;
         let item = serde_json::from_str::<MastersysTicket>(json)
             .unwrap()
-            .to_work_item(&ParkedStatuses::default())
+            .to_work_item(&ParkedStatuses::default(), TicketRoles::default())
             .unwrap();
         assert!(item.completed);
     }
@@ -1235,7 +1416,7 @@ mod tests {
         let json = r#"{"id":9,"title":"x","status":"cancelado","priority":"low"}"#;
         let item = serde_json::from_str::<MastersysTicket>(json)
             .unwrap()
-            .to_work_item(&ParkedStatuses::default())
+            .to_work_item(&ParkedStatuses::default(), TicketRoles::default())
             .unwrap();
         assert!(item.removed);
     }
@@ -1249,11 +1430,11 @@ mod tests {
         let ticket_json = r#"{"id":5,"title":"b","status":"novo","priority":"low"}"#;
         let a = serde_json::from_str::<MastersysTask>(task_json)
             .unwrap()
-            .to_work_item(&ParkedStatuses::default())
+            .to_work_item(&ParkedStatuses::default(), TicketRoles::default())
             .unwrap();
         let b = serde_json::from_str::<MastersysTicket>(ticket_json)
             .unwrap()
-            .to_work_item(&ParkedStatuses::default())
+            .to_work_item(&ParkedStatuses::default(), TicketRoles::default())
             .unwrap();
         assert_ne!(a.reference.dedup_key(), b.reference.dedup_key());
     }
@@ -1292,7 +1473,9 @@ mod tests {
         let task: MastersysTask = serde_json::from_str(json).unwrap();
         assert_eq!(task.description, "");
         assert_eq!(task.ticket_id, None);
-        assert!(task.to_work_item(&ParkedStatuses::default()).is_ok());
+        assert!(task
+            .to_work_item(&ParkedStatuses::default(), TicketRoles::default())
+            .is_ok());
     }
 
     #[test]
@@ -1355,7 +1538,7 @@ mod tests {
         .into_iter()
         .collect();
 
-        let item = task.to_work_item(&parked).unwrap();
+        let item = task.to_work_item(&parked, TicketRoles::default()).unwrap();
         assert!(
             item.reference.status_parked,
             "item com chamado em pós-atendimento tem de contar como parado"
@@ -1372,7 +1555,9 @@ mod tests {
         let json = r#"{"id":2,"title":"tarefa solta","status":"pending"}"#;
         let task: MastersysTask = serde_json::from_str(json).unwrap();
         assert_eq!(task.effective_status(), "pending");
-        let item = task.to_work_item(&ParkedStatuses::default()).unwrap();
+        let item = task
+            .to_work_item(&ParkedStatuses::default(), TicketRoles::default())
+            .unwrap();
         assert!(!item.reference.status_parked);
     }
 
@@ -1385,7 +1570,9 @@ mod tests {
         let task: MastersysTask = serde_json::from_str(json).unwrap();
         assert_eq!(task.ticket_status, None);
         assert_eq!(task.effective_status(), "in_progress");
-        assert!(task.to_work_item(&ParkedStatuses::default()).is_ok());
+        assert!(task
+            .to_work_item(&ParkedStatuses::default(), TicketRoles::default())
+            .is_ok());
     }
 
     #[test]
@@ -1475,7 +1662,8 @@ mod tests {
         let json = r#"{"id":1,"title":"   ","status":"pending"}"#;
         let task: MastersysTask = serde_json::from_str(json).unwrap();
         assert!(
-            task.to_work_item(&ParkedStatuses::default()).is_err(),
+            task.to_work_item(&ParkedStatuses::default(), TicketRoles::default())
+                .is_err(),
             "item sem título viraria uma tarefa sem nome no quadro"
         );
     }

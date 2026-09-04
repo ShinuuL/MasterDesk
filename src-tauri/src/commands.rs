@@ -13,6 +13,7 @@ use masterdesk_application::{
 };
 use masterdesk_domain::{
     ExternalWorkItem, Note, Priority, ReminderThreshold, SupportIdentity, Task, TaskNote,
+    TicketLink,
 };
 use masterdesk_infrastructure::{
     LocalAuthRepository, MastersysProvider, MastersysTicketStatus, NotificationService,
@@ -135,6 +136,9 @@ pub struct CreateTaskPayload {
     pub deadline: Option<String>, // ISO8601 UTC
     #[serde(default)]
     pub reminder_thresholds: Option<Vec<i64>>, // minutos antes do deadline
+    /// Vínculo manual com um chamado, quando a tarefa nasce vinculada.
+    #[serde(default)]
+    pub link: Option<TicketLinkPayload>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -144,6 +148,35 @@ pub struct UpdateTaskPayload {
     pub priority: Option<String>,
     pub deadline: Option<Option<String>>, // Some(None)=clear, None=no change
     pub reminder_thresholds: Option<Vec<i64>>, // minutos antes do deadline
+    /// Grava/substitui o vínculo. Ausente = não mexe.
+    #[serde(default)]
+    pub link: Option<TicketLinkPayload>,
+    /// Remove o vínculo. Flag explícita em vez de `Option<Option<..>>` porque
+    /// através da ponte JSON "ausente" e "null" são fáceis de confundir, e
+    /// confundi-los aqui apagaria silenciosamente um vínculo do usuário.
+    /// Vence `link` se ambos vierem.
+    #[serde(default)]
+    pub unlink: bool,
+}
+
+/// Vínculo manual como o frontend o envia. Convertido para `TicketLink` (que
+/// valida) na borda — o comando nunca monta a entidade à mão.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TicketLinkPayload {
+    pub ticket: String,
+    #[serde(default)]
+    pub client: Option<String>,
+    #[serde(default)]
+    pub custom_status: Option<String>,
+}
+
+impl TicketLinkPayload {
+    fn into_domain(self) -> Result<TicketLink, String> {
+        TicketLink::new(self.ticket)
+            .and_then(|l| l.with_client(self.client))
+            .and_then(|l| l.with_custom_status(self.custom_status))
+            .map_err(|e| e.to_string())
+    }
 }
 
 /// Converte minutos (u32) em `ReminderThreshold`. Usa `Minutes` para minutos
@@ -790,6 +823,10 @@ pub async fn create_task(
         priority: parse_priority(payload.priority),
         deadline: parse_deadline(payload.deadline)?,
         reminder_thresholds: parse_thresholds(payload.reminder_thresholds)?,
+        link: payload
+            .link
+            .map(TicketLinkPayload::into_domain)
+            .transpose()?,
     };
     svc.create_task(input).await.map_err(|e| e.to_string())
 }
@@ -839,12 +876,24 @@ pub async fn update_task(
         }
     };
 
+    // `unlink` vence: pedir para desvincular e mandar vínculo na mesma
+    // chamada é contradição, e desvincular é a intenção mais explícita.
+    let link = if payload.unlink {
+        Some(None)
+    } else {
+        match payload.link {
+            None => None,
+            Some(p) => Some(Some(p.into_domain()?)),
+        }
+    };
+
     let input = UpdateTaskInput {
         title: payload.title,
         description: payload.description,
         priority: parse_priority(payload.priority),
         deadline,
         reminder_thresholds: parse_thresholds(payload.reminder_thresholds)?,
+        link,
     };
     svc.update_task(uid, input).await.map_err(|e| e.to_string())
 }

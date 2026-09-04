@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use masterdesk_domain::{
     ports::TaskRepository, DomainError, DomainResult, ExternalKind, ExternalRef, ExternalSystem,
-    Priority, ReminderThreshold, Task, TaskId,
+    Priority, ReminderThreshold, Task, TaskId, TicketLink,
 };
 use sqlx::SqlitePool;
 use uuid::Uuid;
@@ -46,6 +46,11 @@ struct TaskRow {
     external_ticket: Option<String>,
     external_status: Option<String>,
     external_status_parked: i64,
+    external_role_analyst: i64,
+    external_role_attendant: i64,
+    link_ticket: Option<String>,
+    link_client: Option<String>,
+    link_status: Option<String>,
     created_at: String,
     updated_at: String,
 }
@@ -99,7 +104,11 @@ fn row_to_task(row: TaskRow) -> DomainResult<Task> {
         row.external_ticket,
         row.external_status,
         row.external_status_parked != 0,
+        row.external_role_analyst != 0,
+        row.external_role_attendant != 0,
     )?;
+
+    let link = row_to_link(row.link_ticket, row.link_client, row.link_status)?;
 
     Ok(Task::reconstitute(
         id,
@@ -112,7 +121,27 @@ fn row_to_task(row: TaskRow) -> DomainResult<Task> {
         created_at,
         updated_at,
     )?
-    .attach_external(external))
+    .attach_external(external)
+    .attach_link(link))
+}
+
+/// Reidrata o vínculo manual. `link_ticket` nulo = sem vínculo; cliente e
+/// status personalizado sozinhos não formam vínculo e são ignorados (não são
+/// corrupção como no caso do espelho — são colunas soltas que só têm sentido
+/// acompanhando um número de chamado).
+fn row_to_link(
+    ticket: Option<String>,
+    client: Option<String>,
+    status: Option<String>,
+) -> DomainResult<Option<TicketLink>> {
+    let Some(ticket) = ticket else {
+        return Ok(None);
+    };
+    let link = TicketLink::new(ticket)
+        .and_then(|l| l.with_client(client))
+        .and_then(|l| l.with_custom_status(status))
+        .map_err(|_| DomainError::Persistence)?;
+    Ok(Some(link))
 }
 
 /// Uma linha so e considerada externa quando sistema + tipo + id estao todos
@@ -126,6 +155,8 @@ fn row_to_external(
     ticket: Option<String>,
     status: Option<String>,
     status_parked: bool,
+    role_analyst: bool,
+    role_attendant: bool,
 ) -> DomainResult<Option<ExternalRef>> {
     match (system, kind, external_id) {
         (None, None, None) => Ok(None),
@@ -137,7 +168,8 @@ fn row_to_external(
                 .with_client(client)
                 .with_ticket(ticket)
                 .with_status_label(status)
-                .with_status_parked(status_parked);
+                .with_status_parked(status_parked)
+                .with_roles(role_analyst, role_attendant);
             Ok(Some(reference))
         }
         _ => Err(DomainError::Persistence),
@@ -170,6 +202,8 @@ impl TaskRepository for SqliteTaskRepository {
                 external_system, external_kind, external_id,
                 external_client, external_ticket, external_status,
                 external_status_parked,
+                external_role_analyst, external_role_attendant,
+                link_ticket, link_client, link_status,
                 created_at, updated_at
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5,
@@ -177,7 +211,9 @@ impl TaskRepository for SqliteTaskRepository {
                 ?8, ?9, ?10,
                 ?11, ?12, ?13,
                 ?14,
-                ?15, ?16
+                ?15, ?16,
+                ?17, ?18, ?19,
+                ?20, ?21
             )
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
@@ -193,6 +229,11 @@ impl TaskRepository for SqliteTaskRepository {
                 external_ticket = excluded.external_ticket,
                 external_status = excluded.external_status,
                 external_status_parked = excluded.external_status_parked,
+                external_role_analyst = excluded.external_role_analyst,
+                external_role_attendant = excluded.external_role_attendant,
+                link_ticket = excluded.link_ticket,
+                link_client = excluded.link_client,
+                link_status = excluded.link_status,
                 updated_at = excluded.updated_at
             "#,
         )
@@ -214,6 +255,19 @@ impl TaskRepository for SqliteTaskRepository {
                 .as_ref()
                 .map_or(0i64, |e| if e.status_parked { 1 } else { 0 }),
         )
+        .bind(
+            task.external
+                .as_ref()
+                .map_or(0i64, |e| if e.role_analyst { 1 } else { 0 }),
+        )
+        .bind(
+            task.external
+                .as_ref()
+                .map_or(0i64, |e| if e.role_attendant { 1 } else { 0 }),
+        )
+        .bind(task.link.as_ref().map(|l| l.ticket.clone()))
+        .bind(task.link.as_ref().and_then(|l| l.client.clone()))
+        .bind(task.link.as_ref().and_then(|l| l.custom_status.clone()))
         .bind(created_str)
         .bind(now_str)
         .execute(&self.pool)
@@ -450,6 +504,69 @@ mod tests {
         let overdue_list = repo.list_overdue().await.unwrap();
         assert_eq!(overdue_list.len(), 1);
         assert_eq!(overdue_list[0].id, overdue.id);
+    }
+    #[tokio::test]
+    async fn roles_survive_a_roundtrip() {
+        let repo = fresh_repo().await;
+        let reference = ExternalRef::new(ExternalSystem::Mastersys, ExternalKind::Ticket, "t-1")
+            .unwrap()
+            .with_roles(false, true);
+        let task = Task::new("sou o atendente")
+            .unwrap()
+            .attach_external(Some(reference));
+        repo.save(&task).await.unwrap();
+
+        let external = repo
+            .find_by_id(task.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .external
+            .unwrap();
+        assert!(!external.role_analyst);
+        assert!(external.role_attendant);
+    }
+
+    #[tokio::test]
+    async fn manual_link_survives_a_roundtrip_without_becoming_a_mirror() {
+        let repo = fresh_repo().await;
+        let mut task = Task::new("acompanhar retorno").unwrap();
+        task.set_ticket_link(Some(
+            masterdesk_domain::TicketLink::new("991")
+                .unwrap()
+                .with_client(Some("Padaria Central".into()))
+                .unwrap()
+                .with_custom_status(Some("aguardando peça".into()))
+                .unwrap(),
+        ));
+        repo.save(&task).await.unwrap();
+
+        let fetched = repo.find_by_id(task.id).await.unwrap().unwrap();
+        let link = fetched.link.as_ref().unwrap();
+        assert_eq!(link.ticket, "991");
+        assert_eq!(link.client.as_deref(), Some("Padaria Central"));
+        assert_eq!(link.custom_status.as_deref(), Some("aguardando peça"));
+
+        assert!(
+            repo.list_by_external_system(ExternalSystem::Mastersys)
+                .await
+                .unwrap()
+                .is_empty(),
+            "tarefa com vínculo manual não é espelho e não pode entrar na varredura do sync"
+        );
+    }
+
+    #[tokio::test]
+    async fn two_local_tasks_can_point_at_the_same_ticket() {
+        // Diferente do índice único dos espelhos: várias tarefas próprias
+        // sobre o mesmo chamado é uso legítimo (etapas de um mesmo problema).
+        let repo = fresh_repo().await;
+        for title in ["primeira etapa", "segunda etapa"] {
+            let mut task = Task::new(title).unwrap();
+            task.set_ticket_link(Some(masterdesk_domain::TicketLink::new("991").unwrap()));
+            repo.save(&task).await.unwrap();
+        }
+        assert_eq!(repo.list_all().await.unwrap().len(), 2);
     }
 }
 

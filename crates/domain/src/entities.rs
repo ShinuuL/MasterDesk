@@ -412,6 +412,61 @@ mod tests {
     }
 
     #[test]
+    fn ticket_link_validates_and_normalizes() {
+        assert!(TicketLink::new("   ").is_err());
+        assert!(TicketLink::new("9".repeat(65)).is_err());
+
+        let link = TicketLink::new(" 991 ")
+            .unwrap()
+            .with_client(Some("  ".into()))
+            .unwrap()
+            .with_custom_status(Some("  aguardando peça  ".into()))
+            .unwrap();
+        assert_eq!(link.ticket, "991");
+        assert_eq!(link.client, None, "campo em branco não é dado");
+        assert_eq!(link.custom_status.as_deref(), Some("aguardando peça"));
+    }
+
+    #[test]
+    fn ticket_link_rejects_oversized_custom_status_instead_of_truncating() {
+        let long = "x".repeat(65);
+        assert!(
+            TicketLink::new("1")
+                .unwrap()
+                .with_custom_status(Some(long))
+                .is_err(),
+            "cortar em silêncio o que o usuário digitou é pior que recusar"
+        );
+    }
+
+    #[test]
+    fn manual_link_is_not_an_external_mirror() {
+        let mut t = Task::new("acompanhar retorno").unwrap();
+        t.set_ticket_link(Some(TicketLink::new("991").unwrap()));
+
+        assert!(
+            !t.is_external(),
+            "vínculo manual não pode fazer a tarefa passar por espelho — senão o sync a apaga"
+        );
+        assert_eq!(t.related_ticket(), Some("991"));
+
+        t.set_ticket_link(None);
+        assert_eq!(t.related_ticket(), None);
+    }
+
+    #[test]
+    fn related_ticket_prefers_the_mirror_over_the_manual_link() {
+        use crate::external::{ExternalKind, ExternalRef, ExternalSystem};
+        let mut t = Task::new("espelho").unwrap();
+        t.set_ticket_link(Some(TicketLink::new("111").unwrap()));
+        let r = ExternalRef::new(ExternalSystem::Mastersys, ExternalKind::Ticket, "task-1")
+            .unwrap()
+            .with_ticket(Some("222".into()));
+        let t = t.attach_external(Some(r));
+        assert_eq!(t.related_ticket(), Some("222"));
+    }
+
+    #[test]
     fn apply_external_update_overwrites_owned_fields() {
         let mut t = Task::new("título antigo").unwrap();
         t.set_description("desc antiga").unwrap();
@@ -683,8 +738,103 @@ pub struct Task {
     /// frontend que não conhecem o campo.
     #[serde(default)]
     pub external: Option<ExternalRef>,
+    /// Vínculo **manual** com um chamado, criado pelo usuário aqui dentro.
+    ///
+    /// Distinto de [`Task::external`] de propósito: `external` é espelho — a
+    /// origem é dona dos campos e a sincronização os sobrescreve. Este é o
+    /// contrário: tarefa 100% local, que apenas aponta para um chamado, e que
+    /// nenhuma sincronização toca. É o que permite anotar trabalho ligado a um
+    /// chamado sem escrever nada no Mastersys.
+    #[serde(default)]
+    pub link: Option<TicketLink>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+/// Vínculo manual de uma tarefa local a um chamado de suporte.
+///
+/// ## Por que não reusar `ExternalRef`
+///
+/// `ExternalRef` significa "este item **veio** da origem e ela é dona dele".
+/// Gravar um vínculo manual ali faria a tarefa entrar no índice único de
+/// espelhos, aparecer em `list_by_external_system` e ser **apagada** pela
+/// próxima sincronização, que retira todo espelho que não veio na fila. O
+/// pedido é o oposto: um item que o usuário controla e que sobrevive a
+/// qualquer sync.
+///
+/// ## Status personalizado
+///
+/// Texto livre, escolhido pelo usuário, e sem qualquer relação com o catálogo
+/// de status do Mastersys. Não existe cadastro para validar contra — inventar
+/// um vocabulário aqui seria criar significado que a origem não tem (Regra 1).
+/// Vazio significa "sem status próprio", e o card não mostra selo nenhum.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TicketLink {
+    /// Número do chamado como o usuário o conhece. String porque é o número
+    /// que ele digita ou escolhe na busca, não uma chave nossa.
+    pub ticket: String,
+    /// Cliente, quando o vínculo veio da busca no Mastersys e trouxe o nome.
+    /// Só exibição.
+    pub client: Option<String>,
+    /// Status criado pelo usuário para esta tarefa. Texto livre.
+    pub custom_status: Option<String>,
+}
+
+impl TicketLink {
+    pub fn new(ticket: impl Into<String>) -> DomainResult<Self> {
+        let ticket = ticket.into().trim().to_string();
+        if ticket.is_empty() {
+            return Err(DomainError::Validation(
+                "número do chamado não pode ser vazio".into(),
+            ));
+        }
+        if ticket.chars().count() > 64 {
+            return Err(DomainError::Validation(
+                "número do chamado deve ter até 64 caracteres".into(),
+            ));
+        }
+        Ok(Self {
+            ticket,
+            client: None,
+            custom_status: None,
+        })
+    }
+
+    pub fn with_client(mut self, client: Option<String>) -> DomainResult<Self> {
+        self.client = clean_link_field(client, 200, "cliente")?;
+        Ok(self)
+    }
+
+    pub fn with_custom_status(mut self, status: Option<String>) -> DomainResult<Self> {
+        self.custom_status = clean_link_field(status, 64, "status personalizado")?;
+        Ok(self)
+    }
+}
+
+/// Normaliza um campo opcional do vínculo: vazio vira `None`, e comprimento
+/// acima do limite é **erro**, não truncamento.
+///
+/// Truncar seria o caminho de `ExternalRef`, e lá faz sentido: o dado vem da
+/// API e cortar é melhor que derrubar o sync inteiro. Aqui o dado vem de quem
+/// está digitando, e cortar em silêncio o status que a pessoa escreveu é pior
+/// que dizer que passou do limite.
+fn clean_link_field(
+    value: Option<String>,
+    max_chars: usize,
+    field: &str,
+) -> DomainResult<Option<String>> {
+    let Some(trimmed) = value
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+    else {
+        return Ok(None);
+    };
+    if trimmed.chars().count() > max_chars {
+        return Err(DomainError::Validation(format!(
+            "{field} deve ter até {max_chars} caracteres"
+        )));
+    }
+    Ok(Some(trimmed))
 }
 
 /// Threshold de lembrete (seção 8 do CLAUDE.md: 5m/10m/15m/30m/1h/2h/custom).
@@ -743,6 +893,7 @@ impl Task {
             reminder_thresholds: Vec::new(),
             completed: false,
             external: None,
+            link: None,
             created_at: now,
             updated_at: now,
         })
@@ -774,6 +925,7 @@ impl Task {
             reminder_thresholds,
             completed,
             external: None,
+            link: None,
             created_at,
             updated_at,
         })
@@ -789,9 +941,32 @@ impl Task {
         self
     }
 
+    /// Anexa o vínculo manual ao reidratar do banco. Como `attach_external`,
+    /// não chama `touch()`.
+    pub fn attach_link(mut self, link: Option<TicketLink>) -> Self {
+        self.link = link;
+        self
+    }
+
+    /// Cria, altera ou remove (`None`) o vínculo manual com um chamado.
+    pub fn set_ticket_link(&mut self, link: Option<TicketLink>) {
+        self.link = link;
+        self.touch();
+    }
+
     /// True quando a tarefa espelha um item de um sistema de suporte.
     pub fn is_external(&self) -> bool {
         self.external.is_some()
+    }
+
+    /// Número do chamado relacionado, venha ele do espelho ou do vínculo
+    /// manual. É o que a UI usa para mostrar `#chamado` sem se importar com a
+    /// procedência.
+    pub fn related_ticket(&self) -> Option<&str> {
+        self.external
+            .as_ref()
+            .and_then(|e| e.ticket.as_deref())
+            .or(self.link.as_ref().map(|l| l.ticket.as_str()))
     }
 
     /// Aplica no estado local os campos que a origem externa é dona.

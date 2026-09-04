@@ -133,6 +133,45 @@ chegam pelo ramo de *chamados* — não pelos que têm tarefa no quadro.
 Então, nesse intervalo, é **esperado** que alguns itens em pós-atendimento ainda
 apareçam como atrasados. Não é bug novo; é a lacuna que aquele deploy fecha.
 
+## 🐛 Causa raiz no Mastersys — reatribuição da tarefa na mudança de status
+
+Relatado pelo DEV em 2026-09-04: *"o Note acompanhou a mudança de status mas não
+manteve atribuído a meu usuário embora o analista não tenha mudado."*
+
+**O MasterDesk não tinha bug aqui.** A causa está em
+`backend/src/modules/tickets/services/TicketService.ts` (~linha 810), na
+automação que roda ao mudar o status de um chamado:
+
+```ts
+const targetAssigneeId = data.assignedTo ?? ticket.assignedTo ?? (isTechnician ? userId : null);
+// ...
+const taskAssigneeId = data.status === 'em_analise' ? (ticket.createdBy ?? userId) : userId;
+```
+
+Para qualquer status "ativo" que não seja `em_analise` nem `nao_conformidade`, a
+tarefa vinculada é reatribuída a **`userId` — quem mudou o status**, ignorando
+`ticket.assignedTo` (o analista responsável). O `targetAssigneeId` calculado
+logo acima, que traz o analista, não é usado nesse ramo.
+
+Consequência no MasterDesk: a tarefa sai de `GET /api/tasks/users/<eu>` e o
+espelho `task-<id>` fica órfão, embora o chamado continue sendo meu. O quadro
+mostrava o item ser retirado logo depois de "acompanhar" a mudança de status.
+
+**Decisão do DEV em 2026-09-04: não mexer no Mastersys; contornar no
+MasterDesk.** O contorno é a **reancoragem** em `MastersysSyncService::sync`:
+quando um espelho órfão e um item novo apontam para o **mesmo número de
+chamado**, o espelho é reapontado para o id novo em vez de retirado — id local,
+anotações e lembretes preservados. Sete testes cobrem o caminho, incluindo os
+casos em que a reancoragem **não** deve acontecer (chamado diferente, item
+cancelado, dois itens disputando o mesmo espelho).
+
+O que fica pendente: a correção de verdade é usar `ticket.assignedTo` como dono
+da tarefa nessa automação, caindo em quem mudou o status só quando não há
+analista. Enquanto não for feita, no Mastersys a tarefa continua trocando de
+dono — o contorno resolve o quadro do MasterDesk, não o quadro do suporte.
+
+---
+
 ## 🔒 Achado de segurança no Mastersys — reportado, não corrigido
 
 `backend/src/shared/infra/socket/SocketService.ts:36-56`: `chat:join` aceita o

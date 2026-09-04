@@ -22,6 +22,7 @@ use std::sync::Arc;
 use masterdesk_domain::{
     ports::{NotificationService, SupportSystemProvider, TaskNoteRepository, TaskRepository},
     DomainResult, ExternalSystem, ExternalWorkItem, ReminderThreshold, SupportIdentity, Task,
+    TaskId,
 };
 
 /// Ajustes de uma execução de sincronização.
@@ -48,11 +49,15 @@ pub struct SyncReport {
     /// Espelhos que saíram da origem mas foram **preservados** porque tinham
     /// anotações do usuário. Aparecem como concluídos, não desaparecem.
     pub kept_with_notes: u32,
+    /// Espelhos cujo id de origem mudou e foram **reapontados** para o novo
+    /// item do mesmo chamado, em vez de retirados e importados de novo.
+    /// Ver [`MastersysSyncService::sync`].
+    pub reanchored: u32,
 }
 
 impl SyncReport {
     pub fn total_changes(&self) -> u32 {
-        self.imported + self.updated + self.removed + self.kept_with_notes
+        self.imported + self.updated + self.removed + self.kept_with_notes + self.reanchored
     }
 }
 
@@ -109,23 +114,85 @@ impl MastersysSyncService {
     }
 
     /// Puxa a fila do usuário e reconcilia com o estado local.
+    ///
+    /// ## Reancoragem: quando o id do item muda mas o chamado é o mesmo
+    ///
+    /// A chave local de um espelho é o id da origem (`task-123`, `ticket-991`).
+    /// Existe um caminho no Mastersys que troca essa chave sem que nada tenha
+    /// saído da fila da pessoa: ao mudar o status de um chamado para um status
+    /// ativo, `TicketService` reatribui a tarefa vinculada a **quem mudou o
+    /// status** (`taskAssigneeId = userId`), ignorando o analista responsável.
+    /// A tarefa some de `GET /api/tasks/users/<eu>` e o chamado volta pelo ramo
+    /// de chamados, agora como `ticket-991`.
+    ///
+    /// Sem tratamento, o espelho `task-123` era retirado (levando lembretes, e
+    /// as anotações junto quando não havia nenhuma) e um item novo entrava no
+    /// lugar. Foi o que o DEV viu em 2026-09-03: "o Note acompanhou a mudança
+    /// de status mas não manteve atribuído a meu usuário".
+    ///
+    /// Aqui o espelho é **reapontado** para o novo id quando os dois falam do
+    /// mesmo chamado, preservando id local, anotações e lembretes. É contorno
+    /// declarado, não conserto: a causa está no Mastersys e está registrada em
+    /// `docs/PENDENCIAS.md`. O contorno é seguro por si — só age quando o
+    /// número do chamado é o mesmo, e chamado é a identidade que o usuário
+    /// reconhece.
     pub async fn sync(&self, options: SyncOptions) -> DomainResult<SyncReport> {
         let items = self.provider.fetch_assigned_work().await?;
         let mut report = SyncReport::default();
 
-        let mut seen: HashSet<String> = HashSet::with_capacity(items.len());
+        let mirrors = self
+            .task_repo
+            .list_by_external_system(ExternalSystem::Mastersys)
+            .await?;
+
+        // Chaves que a origem devolveu nesta rodada. Calculado antes de
+        // reconciliar porque a reancoragem precisa saber se o espelho candidato
+        // está órfão *nesta* fila, não na anterior.
+        let seen: HashSet<String> = items
+            .iter()
+            .map(|item| item.reference.dedup_key())
+            .collect();
+
+        // Espelhos órfãos (a chave deles não veio) indexados por chamado — os
+        // únicos candidatos a reancoragem.
+        let mut orphans_by_ticket: Vec<(String, Task)> = mirrors
+            .iter()
+            .filter(|task| {
+                task.external
+                    .as_ref()
+                    .is_some_and(|e| !seen.contains(&e.dedup_key()))
+            })
+            .filter_map(|task| {
+                let ticket = task.external.as_ref()?.ticket.clone()?;
+                Some((ticket, task.clone()))
+            })
+            .collect();
+
+        // Ids locais que a reancoragem consumiu, para o passo de retirada não
+        // apagar o que acabou de ser reaproveitado.
+        let mut reanchored_ids: HashSet<TaskId> = HashSet::new();
+
         for item in &items {
-            seen.insert(item.reference.dedup_key());
+            let reanchor = self
+                .take_orphan_for(&mut orphans_by_ticket, item, &reanchored_ids)
+                .await?;
+            if let Some(mut task) = reanchor {
+                task.apply_external_update(item)?;
+                self.task_repo.save(&task).await?;
+                self.reschedule(&task).await;
+                reanchored_ids.insert(task.id);
+                report.reanchored += 1;
+                continue;
+            }
             self.reconcile_item(item, &options, &mut report).await?;
         }
 
         // Itens que existiam localmente e não vieram mais na fila: foram
         // reatribuídos a outra pessoa ou saíram do escopo do usuário.
-        let mirrors = self
-            .task_repo
-            .list_by_external_system(ExternalSystem::Mastersys)
-            .await?;
         for task in mirrors {
+            if reanchored_ids.contains(&task.id) {
+                continue;
+            }
             let still_present = task
                 .external
                 .as_ref()
@@ -136,6 +203,45 @@ impl MastersysSyncService {
         }
 
         Ok(report)
+    }
+
+    /// Escolhe um espelho órfão do mesmo chamado para receber o item novo.
+    ///
+    /// Devolve `None` — e o item segue o caminho normal — quando:
+    ///
+    /// - o item não traz número de chamado (tarefa solta: nada para casar);
+    /// - já existe espelho com a chave exata do item (não é troca de id);
+    /// - nenhum órfão aponta para aquele chamado.
+    ///
+    /// Cada órfão é consumido no máximo uma vez: dois itens do mesmo chamado
+    /// (a tarefa e o chamado, por exemplo) não podem reivindicar o mesmo
+    /// espelho local.
+    async fn take_orphan_for(
+        &self,
+        orphans: &mut Vec<(String, Task)>,
+        item: &ExternalWorkItem,
+        already_used: &HashSet<TaskId>,
+    ) -> DomainResult<Option<Task>> {
+        // Item cancelado/removido não é reancorado: ele vai ser retirado de
+        // qualquer forma, e reapontar o espelho antes disso só embaralharia.
+        if item.removed {
+            return Ok(None);
+        }
+        let Some(ticket) = item.reference.ticket.as_deref() else {
+            return Ok(None);
+        };
+        if self
+            .task_repo
+            .find_by_external(&item.reference)
+            .await?
+            .is_some()
+        {
+            return Ok(None);
+        }
+        let position = orphans
+            .iter()
+            .position(|(t, task)| t == ticket && !already_used.contains(&task.id));
+        Ok(position.map(|i| orphans.remove(i).1))
     }
 
     async fn reconcile_item(
@@ -391,6 +497,19 @@ mod tests {
         ExternalWorkItem::new(reference, title).unwrap()
     }
 
+    /// Item que carrega número de chamado — condição para reancoragem.
+    fn item_of_ticket(id: &str, title: &str, ticket: &str) -> ExternalWorkItem {
+        let kind = if id.starts_with("ticket-") {
+            ExternalKind::Ticket
+        } else {
+            ExternalKind::Task
+        };
+        let reference = ExternalRef::new(ExternalSystem::Mastersys, kind, id)
+            .unwrap()
+            .with_ticket(Some(ticket.into()));
+        ExternalWorkItem::new(reference, title).unwrap()
+    }
+
     struct Fixture {
         service: MastersysSyncService,
         tasks: Arc<FakeTasks>,
@@ -448,6 +567,119 @@ mod tests {
         assert_eq!(all.len(), 1, "não pode duplicar o mesmo item externo");
         assert_eq!(all[0].title, "Título novo");
         assert_eq!(all[0].priority, Priority::Urgent);
+    }
+
+    #[tokio::test]
+    async fn mirror_is_reanchored_when_the_source_id_changes_but_the_ticket_is_the_same() {
+        // Cenário exato do bug: a tarefa do chamado 991 é reatribuída no
+        // Mastersys por causa de uma mudança de status, sai de
+        // `/api/tasks/users/<eu>`, e o chamado volta pelo ramo de chamados.
+        let f = fixture(vec![item_of_ticket("task-123", "Corrigir NF-e", "991")]);
+        f.service.sync(SyncOptions::default()).await.unwrap();
+        let before = f.tasks.list_all().await.unwrap();
+        assert_eq!(before.len(), 1);
+        let local_id = before[0].id;
+
+        *f.provider.items.lock().unwrap() =
+            vec![item_of_ticket("ticket-991", "Corrigir NF-e", "991")];
+        let report = f.service.sync(SyncOptions::default()).await.unwrap();
+
+        assert_eq!(report.reanchored, 1);
+        assert_eq!(report.removed, 0, "o espelho não pode ser retirado");
+        assert_eq!(report.imported, 0, "nem reimportado como item novo");
+
+        let after = f.tasks.list_all().await.unwrap();
+        assert_eq!(after.len(), 1, "continua sendo um item só no quadro");
+        assert_eq!(after[0].id, local_id, "o id local sobrevive à troca");
+        assert_eq!(
+            after[0].external.as_ref().unwrap().external_id,
+            "ticket-991",
+            "e passa a apontar para o id novo da origem"
+        );
+    }
+
+    #[tokio::test]
+    async fn reanchoring_preserves_the_users_notes() {
+        let f = fixture(vec![item_of_ticket("task-123", "Corrigir NF-e", "991")]);
+        f.service.sync(SyncOptions::default()).await.unwrap();
+        let task_id = f.tasks.list_all().await.unwrap()[0].id;
+        f.notes
+            .save(&TaskNote::new(task_id, "cliente ligou 14h").unwrap())
+            .await
+            .unwrap();
+
+        *f.provider.items.lock().unwrap() =
+            vec![item_of_ticket("ticket-991", "Corrigir NF-e", "991")];
+        f.service.sync(SyncOptions::default()).await.unwrap();
+
+        let notes = f.notes.list_by_task(task_id).await.unwrap();
+        assert_eq!(
+            notes.len(),
+            1,
+            "anotação segue colada na mesma tarefa local"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_different_ticket_is_not_reanchored() {
+        let f = fixture(vec![item_of_ticket("task-123", "Chamado 991", "991")]);
+        f.service.sync(SyncOptions::default()).await.unwrap();
+
+        // Outro chamado: é item novo, e o antigo saiu mesmo da fila.
+        *f.provider.items.lock().unwrap() =
+            vec![item_of_ticket("ticket-555", "Chamado 555", "555")];
+        let report = f.service.sync(SyncOptions::default()).await.unwrap();
+
+        assert_eq!(report.reanchored, 0);
+        assert_eq!(report.imported, 1);
+        assert_eq!(report.removed, 1);
+    }
+
+    #[tokio::test]
+    async fn an_item_still_in_the_queue_is_updated_not_reanchored() {
+        let f = fixture(vec![item_of_ticket("task-123", "antigo", "991")]);
+        f.service.sync(SyncOptions::default()).await.unwrap();
+
+        // Mesma chave de origem: caminho normal de atualização.
+        *f.provider.items.lock().unwrap() = vec![item_of_ticket("task-123", "novo", "991")];
+        let report = f.service.sync(SyncOptions::default()).await.unwrap();
+
+        assert_eq!(report.reanchored, 0);
+        assert_eq!(report.updated, 1);
+        assert_eq!(f.tasks.list_all().await.unwrap()[0].title, "novo");
+    }
+
+    #[tokio::test]
+    async fn two_items_of_the_same_ticket_do_not_claim_the_same_mirror() {
+        let f = fixture(vec![item_of_ticket("task-123", "Chamado 991", "991")]);
+        f.service.sync(SyncOptions::default()).await.unwrap();
+
+        // A tarefa mudou de id E o chamado veio solto: um reancora, o outro
+        // entra como item novo — nunca os dois no mesmo espelho local.
+        *f.provider.items.lock().unwrap() = vec![
+            item_of_ticket("task-456", "Chamado 991", "991"),
+            item_of_ticket("ticket-991", "Chamado 991", "991"),
+        ];
+        let report = f.service.sync(SyncOptions::default()).await.unwrap();
+
+        assert_eq!(report.reanchored, 1);
+        assert_eq!(report.imported, 1);
+        assert_eq!(f.tasks.list_all().await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_canceled_item_is_retired_instead_of_reanchored() {
+        let f = fixture(vec![item_of_ticket("task-123", "Chamado 991", "991")]);
+        f.service.sync(SyncOptions::default()).await.unwrap();
+
+        let mut canceled = item_of_ticket("ticket-991", "Chamado 991", "991");
+        canceled.removed = true;
+        *f.provider.items.lock().unwrap() = vec![canceled];
+        let report = f.service.sync(SyncOptions::default()).await.unwrap();
+
+        assert_eq!(report.reanchored, 0);
+        assert_eq!(report.removed, 1);
+        assert!(f.tasks.list_all().await.unwrap().is_empty());
     }
 
     #[tokio::test]

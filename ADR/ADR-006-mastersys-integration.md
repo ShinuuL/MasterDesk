@@ -276,3 +276,68 @@ do usuário. O resultado **não pode** ser gravado como espelho: a sincronizaç�
 seguinte não o veria na fila e o `retire_mirror` o apagaria, junto com qualquer
 anotação. A ação oferecida é criar uma **tarefa local** (`external = null`), que
 sobrevive ao sync em troca de não acompanhar mudanças do chamado.
+
+### Emenda de 2026-09-04 — dois papéis, vínculo manual e reancoragem
+
+Três acréscimos pedidos pelo DEV, todos dentro da decisão original (somente
+leitura, espelho por `pull`).
+
+#### 1. Analista **e** atendente
+
+A fila de uma pessoa no suporte tem dois papéis, e até aqui só um era puxado:
+
+```
+assigned_to → Analista Responsável   (era o único: `assignedTo=<eu>`)
+created_by  → Atendente — quem abriu/assumiu o chamado
+```
+
+A distinção é da própria origem, documentada no filtro `attendantId` de
+`TicketRepository.ts`. Como os filtros da listagem são combinados com **AND**,
+não há chamada única para "sou um ou outro": são duas
+(`assignedTo=<eu>` e `attendantId=<eu>`), unidas por id no adapter.
+
+**O papel é recalculado sobre a resposta, não inferido da chamada.** Uma
+instalação do Mastersys anterior ao filtro `attendantId` ignora o parâmetro
+desconhecido (o schema zod descarta chaves que não conhece) e devolve **todos**
+os chamados da janela. Confiar na origem da chamada encheria o quadro de
+chamados de terceiros rotulados "Atendente". Como `TicketDTO` traz `assignedTo`
+e `createdBy`, o papel sai do próprio chamado e quem não tem papel é
+descartado — contra instalação antiga o resultado fica correto, só mais caro.
+
+`ExternalRef.role_analyst` / `role_attendant` ambos falsos significam **"a
+origem não informou papel"**, não "nenhum papel": é o estado de uma tarefa
+atribuída a mim cujo chamado é de outra dupla, e nesse caso a UI não afirma nada.
+
+#### 2. Vínculo manual (`Task.link`), separado do espelho
+
+Tarefa local que aponta para um chamado, com status personalizado de texto
+livre. Modelada **fora** de `ExternalRef` de propósito: `external` significa "a
+origem é dona deste item", o que a colocaria no índice único de espelhos, em
+`list_by_external_system` e na alça do `retire_mirror` — que apaga todo espelho
+que não volta na fila. O vínculo precisa do oposto: sobreviver a qualquer sync,
+porque o dono é o usuário.
+
+Nada é escrito no Mastersys (a integração continua sem métodos de escrita), e o
+status personalizado não é validado contra o catálogo de status: não existe
+cadastro para isso, e reusar o vocabulário da origem mentiria sobre a
+procedência do valor. Na UI ele aparece com contorno tracejado, distinto do selo
+colorido do status de origem.
+
+#### 3. Reancoragem do espelho quando o id da origem muda
+
+`TicketService` do Mastersys reatribui a tarefa vinculada a **quem mudou o
+status** do chamado, ignorando o analista responsável (registrado em
+`docs/PENDENCIAS.md`). A tarefa sai de `GET /api/tasks/users/<eu>` e o chamado
+volta pelo ramo de chamados com outra chave — `task-123` vira `ticket-991`.
+
+Sem tratamento o espelho era retirado e reimportado, perdendo lembretes e (sem
+anotações) o próprio item. A sincronização agora **reaponta** o espelho órfão
+para o id novo quando os dois têm o mesmo número de chamado, preservando id
+local, anotações e lembretes; `SyncReport.reanchored` conta os casos.
+
+Alternativa considerada e rejeitada: trocar a chave local do espelho para o
+número do chamado. Resolveria este caso, mas quebra tarefa sem chamado (não tem
+número) e junta num só espelho as várias tarefas de um mesmo chamado.
+
+A reancoragem é contorno declarado, não conserto: a causa está no Mastersys e a
+correção lá — usar `ticket.assignedTo` como dono da tarefa — continua pendente.

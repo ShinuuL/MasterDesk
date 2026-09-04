@@ -6,7 +6,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use masterdesk_domain::{
     ports::{NotificationService, TaskRepository},
-    DomainError, DomainResult, Priority, ReminderThreshold, Task, TaskId,
+    DomainError, DomainResult, Priority, ReminderThreshold, Task, TaskId, TicketLink,
 };
 
 #[derive(Debug, Clone)]
@@ -16,6 +16,11 @@ pub struct CreateTaskInput {
     pub priority: Option<Priority>,
     pub deadline: Option<DateTime<Utc>>,
     pub reminder_thresholds: Option<Vec<ReminderThreshold>>,
+    /// Vínculo manual com um chamado. `None` = tarefa local sem vínculo.
+    ///
+    /// Nunca produz espelho: a tarefa continua sendo do usuário e não entra na
+    /// reconciliação da sincronização — ver [`masterdesk_domain::TicketLink`].
+    pub link: Option<TicketLink>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -25,6 +30,9 @@ pub struct UpdateTaskInput {
     pub priority: Option<Priority>,
     pub deadline: Option<Option<DateTime<Utc>>>,
     pub reminder_thresholds: Option<Vec<ReminderThreshold>>,
+    /// `None` = não mexe, `Some(None)` = desvincula, `Some(Some(l))` = grava.
+    /// Mesmo protocolo de três estados já usado por `deadline`.
+    pub link: Option<Option<TicketLink>>,
 }
 
 pub struct TaskService {
@@ -57,6 +65,9 @@ impl TaskService {
         if let Some(thresholds) = input.reminder_thresholds {
             task.set_reminder_thresholds(thresholds)?;
         }
+        if let Some(link) = input.link {
+            task.set_ticket_link(Some(link));
+        }
         self.task_repo.save(&task).await?;
 
         // Schedule reminders if we have a notification service and a deadline
@@ -88,6 +99,9 @@ impl TaskService {
         }
         if let Some(thresholds) = input.reminder_thresholds {
             task.set_reminder_thresholds(thresholds)?;
+        }
+        if let Some(link) = input.link {
+            task.set_ticket_link(link);
         }
 
         self.task_repo.save(&task).await?;
@@ -342,6 +356,7 @@ mod tests {
                 priority: Some(Priority::High),
                 deadline: None,
                 reminder_thresholds: None,
+                link: None,
             })
             .await
             .unwrap();
@@ -363,6 +378,7 @@ mod tests {
                 priority: None,
                 deadline: None,
                 reminder_thresholds: None,
+                link: None,
             })
             .await
             .unwrap();
@@ -396,6 +412,7 @@ mod tests {
                 priority: None,
                 deadline: None,
                 reminder_thresholds: None,
+                link: None,
             })
             .await
             .unwrap();
@@ -423,6 +440,7 @@ mod tests {
                 priority: None,
                 deadline: None,
                 reminder_thresholds: None,
+                link: None,
             })
             .await;
         assert!(matches!(res, Err(DomainError::Validation(_))));
@@ -438,6 +456,7 @@ mod tests {
                 priority: None,
                 deadline: Some(Utc::now() - chrono::Duration::try_minutes(30).unwrap()),
                 reminder_thresholds: None,
+                link: None,
             })
             .await
             .unwrap();
@@ -460,6 +479,7 @@ mod tests {
                     ReminderThreshold::Minutes(5),
                     ReminderThreshold::Minutes(15),
                 ]),
+                link: None,
             })
             .await
             .unwrap();
@@ -479,6 +499,7 @@ mod tests {
                 priority: None,
                 deadline: Some(Utc::now() + chrono::Duration::try_hours(1).unwrap()),
                 reminder_thresholds: Some(vec![ReminderThreshold::Minutes(5)]),
+                link: None,
             })
             .await
             .unwrap();
@@ -487,5 +508,92 @@ mod tests {
 
         let cancelled = mock.cancelled.lock().unwrap();
         assert!(cancelled.contains(&t.id));
+    }
+
+    #[tokio::test]
+    async fn create_with_manual_link_and_custom_status() {
+        let (_, _, svc) = setup();
+        let link = TicketLink::new("991")
+            .unwrap()
+            .with_client(Some("Padaria Central".into()))
+            .unwrap()
+            .with_custom_status(Some("aguardando peça".into()))
+            .unwrap();
+
+        let t = svc
+            .create_task(CreateTaskInput {
+                title: "trocar fonte".into(),
+                description: None,
+                priority: None,
+                deadline: None,
+                reminder_thresholds: None,
+                link: Some(link),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(t.related_ticket(), Some("991"));
+        assert_eq!(
+            t.link.as_ref().unwrap().custom_status.as_deref(),
+            Some("aguardando peça")
+        );
+        assert!(
+            !t.is_external(),
+            "vincular não transforma a tarefa em espelho do Mastersys"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_can_change_and_clear_the_link() {
+        let (_, _, svc) = setup();
+        let t = svc
+            .create_task(CreateTaskInput {
+                title: "com vínculo".into(),
+                description: None,
+                priority: None,
+                deadline: None,
+                reminder_thresholds: None,
+                link: Some(TicketLink::new("100").unwrap()),
+            })
+            .await
+            .unwrap();
+
+        // Só o status personalizado muda; o resto do vínculo permanece.
+        let changed = svc
+            .update_task(
+                t.id,
+                UpdateTaskInput {
+                    link: Some(Some(
+                        TicketLink::new("100")
+                            .unwrap()
+                            .with_custom_status(Some("em validação interna".into()))
+                            .unwrap(),
+                    )),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            changed.link.as_ref().unwrap().custom_status.as_deref(),
+            Some("em validação interna")
+        );
+
+        // `Some(None)` desvincula; `None` não tocaria no campo.
+        let cleared = svc
+            .update_task(
+                t.id,
+                UpdateTaskInput {
+                    link: Some(None),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert!(cleared.link.is_none());
+        assert_eq!(
+            cleared.title, "com vínculo",
+            "desvincular não apaga a tarefa"
+        );
     }
 }
