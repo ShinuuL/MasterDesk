@@ -5,6 +5,10 @@ node_modules/
 dist/
 target/
 
+# Artefatos de release (instalador, latest.json) — vão para o repo de releases,
+# nunca para o repo de código. Ver scripts/release.ps1.
+dist-windows/
+
 # IDE
 .vscode/
 .idea/

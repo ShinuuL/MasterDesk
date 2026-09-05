@@ -38,9 +38,9 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/ShinuuL/MasterDesk/releases/latest/download/latest.json"
+        "https://updates-gateway.sofaltaumaletr.workers.dev/v1/apps/masternote/updater.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlFMURGMzhGNDc5OTUxQzcKUldUSFVabEhqL01kbnJ0cHJ1ZS9oQnJydTQ1STBEUWYrVlk0bEhtbm9JN2N2NHhNTW93S29YaVUK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZENjgxNzgyMDU0ODlFMUMKUldRY25rZ0ZnaGRvL1pydS9VVUZ1dnJwUWJmNktKalh2c3FiQTErU0ZMVXhESlNKTzg3Y0VmdzIK",
       "windows": {
         "installMode": "passive"
       }
