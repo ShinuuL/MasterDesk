@@ -1,0 +1,34 @@
+# Configuracao de deploy deste projeto (deploy-base)
+[deploy]
+app         = "masternote"          # id do app: minusculas, sem espacos; vira prefixo da tag
+repo        = "ShinuuL/Releases"    # repo privado que guarda as releases de todos os apps
+gateway     = "https://updates-gateway.sofaltaumaletr.workers.dev"  # URL publica do Worker
+channel     = "stable"              # stable | beta
+private_key = 'C:/chaves/deploy-base.pem'       # PEM de assinatura -- FORA do repo; aspas simples = caminho literal
+public_key  = "104c81a81b05108f914c50d091cd184a210eae57528e20298d8835344b740045" # hex (Ed25519, publica -- pode versionar)
+
+# ATENCAO -- este app tem DUAS assinaturas, com papeis diferentes:
+#
+#   Ed25519 (as chaves acima)  -> manifesto do deploy-base, lido pelo PORTAL
+#                                 para montar o botao de download.
+#   minisign (C:/chaves/masternote-updater.key) -> `latest.json`, lido pelo
+#                                 UPDATER DENTRO DO APP. A publica correspondente
+#                                 esta em `plugins.updater.pubkey` do
+#                                 `src-tauri/tauri.conf.json`.
+#
+# Sao mecanismos independentes que convivem na mesma release. Perder a minisign
+# significa que nenhuma versao futura consegue atualizar as instalacoes
+# existentes -- elas teriam de ser reinstaladas a mao. Ver `docs/ATUALIZACAO.md`.
+
+# Instalador do Windows (NSIS). Gere com `scripts/release.ps1`, que compila e
+# copia para dist-windows/ com o nome do produto -- o publish versiona a partir
+# do nome do arquivo, produzindo masternote-0.2.0.exe.
+#
+# Enquanto o arquivo nao existir, o `publish` recusa com "artefato nao
+# encontrado" e nao sobe release nenhuma. E de proposito: uma publicacao que
+# esqueca o instalador deixaria o portal oferecendo um botao que nao baixa.
+[[artifact]]
+path     = "dist-windows/masternote.exe"
+platform = "windows"
+arch     = "x64"
+kind     = "exe"

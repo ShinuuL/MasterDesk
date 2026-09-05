@@ -1,23 +1,27 @@
-# Publica o instalador do MasterNote e o `latest.json` que o updater consulta.
+# Confere que o instalador do MasterNote compila. NAO publica.
 #
-# Dispara ao empurrar uma tag `v*` (ex.: `v0.2.0`). A tag precisa bater com a
-# `version` do `src-tauri/tauri.conf.json` — o updater compara a versão do
-# manifesto com a compilada no binário, e uma tag adiantada faz o app se achar
-# desatualizado contra ele mesmo, mostrando o toast em looping.
-name: release
+# A publicacao acontece na maquina do DEV, por `scripts/release.ps1`, e nao aqui.
+# O motivo e a chave: uma release do MasterNote carrega duas assinaturas, e a
+# Ed25519 do deploy-base (`C:/chaves/deploy-base.pem`) por decisao de projeto
+# nunca sai da maquina que publica -- e justamente o que faz o gateway e o CDN
+# serem so transporte. Colocar essa chave num secret do Actions desfaria a
+# propriedade que ela existe para garantir.
+#
+# Historico: ate 2026-09-05 este workflow disparava em tags `v*` e publicava com
+# a `tauri-action` no proprio `ShinuuL/MasterDesk`. Isso ficou incompativel com a
+# decisao de 2026-09-04 (instaladores no repo privado + gateway) em dois pontos:
+# publicava no repo publico errado, e usava a tag `v0.2.0`, que nao casa com o
+# padrao `<app>-v<semver>` pelo qual o gateway descobre os apps -- o portal nunca
+# enxergaria a release. Ver `docs/ATUALIZACAO.md`.
+name: release-check
 
 on:
+  workflow_dispatch:
   push:
-    tags: ["v*"]
+    tags: ["masternote-v*"]
 
 permissions:
-  contents: write # necessário para criar a release e subir os artefatos
-
-# ATENÇÃO: a `tauri-action` publica no repositório onde o workflow roda —
-# `ShinuuL/MasterDesk`. Se os instaladores tiverem de ir para o repo de releases
-# privado, falta um passo de `gh release upload` para lá, com um PAT em secret:
-# o `GITHUB_TOKEN` do Actions não alcança outro repositório. Ver
-# `docs/ATUALIZACAO.md`.
+  contents: read
 
 jobs:
   build:
@@ -33,8 +37,8 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # Cacheia `target/` — sem isso cada release recompila o grafo inteiro
-      # (tauri, sqlx, reqwest) do zero, ~15 min por tag.
+      # Cacheia `target/` — sem isso cada execucao recompila o grafo inteiro
+      # (tauri, sqlx, reqwest) do zero, ~15 min.
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -42,26 +46,15 @@ jobs:
       - run: npm ci
         working-directory: frontend
 
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Par de chaves do updater. A privada NÃO vive no repositório: é o
-          # conteúdo de `~/.masterdesk/masternote-updater.key`, colado no
-          # secret. Perder essa chave significa que nenhuma versão futura
-          # consegue atualizar as instalações existentes — elas teriam de ser
-          # reinstaladas à mão, com um pubkey novo.
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      # Sem TAURI_SIGNING_PRIVATE_KEY: aqui o objetivo e saber se compila, e o
+      # artefato gerado nao vai a lugar nenhum. O .nsis.zip sai sem assinatura e
+      # seria rejeitado pelo updater -- por isso nao e publicado.
+      - name: Build do instalador
+        working-directory: src-tauri
+        run: node ../frontend/node_modules/@tauri-apps/cli/tauri.js build
+
+      - uses: actions/upload-artifact@v4
         with:
-          projectPath: src-tauri
-          tagName: ${{ github.ref_name }}
-          releaseName: MasterNote ${{ github.ref_name }}
-          releaseBody: |
-            O texto desta seção aparece no toast de atualização dentro do app,
-            cortado em ~180 caracteres. Escreva a primeira frase pensando nisso.
-          # Sai como rascunho para o release ser revisado antes de chegar às
-          # máquinas da equipe: o updater só enxerga releases publicadas, então
-          # publicar é o gesto que dispara a atualização de todo mundo.
-          releaseDraft: true
-          prerelease: false
-          includeUpdaterJson: true
+          name: masternote-installer
+          path: target/release/bundle/nsis/*.exe
+          retention-days: 7
