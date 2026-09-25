@@ -5,7 +5,8 @@ import * as api from "../api";
 type Mode = "login" | "register";
 
 interface AuthPanelProps {
-  onAuthenticated: (user: AuthPayload) => void;
+  /** `rememberFailed`: pediu "manter conectado" e o cofre do SO recusou. */
+  onAuthenticated: (user: AuthPayload, rememberFailed: boolean) => void;
 }
 
 export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
@@ -13,6 +14,9 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [password2, setPassword2] = useState("");
+  // Ligado por padrão: o cofre é do usuário do Windows, e quem divide a
+  // máquina com outra pessoa desmarca — é o padrão dos apps de desktop.
+  const [remember, setRemember] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const firstField = useRef<HTMLInputElement>(null);
@@ -47,9 +51,9 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
     try {
       const res =
         mode === "login"
-          ? await api.authLogin({ username: u, password })
-          : await api.authRegister({ username: u, password });
-      onAuthenticated(res);
+          ? await api.authLogin({ username: u, password, remember })
+          : await api.authRegister({ username: u, password, remember });
+      onAuthenticated(res, remember && !res.remembered);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -128,6 +132,11 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
                 />
               </div>
             )}
+
+            <label className="md-toggle" title="Guarda a sessão no Gerenciador de Credenciais do Windows por até 30 dias sem uso. Sair apaga.">
+              <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+              Manter conectado
+            </label>
 
             {error && (
               <div role="alert" className="md-alert" style={{ margin: 0 }}>

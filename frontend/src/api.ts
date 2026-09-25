@@ -188,6 +188,24 @@ export async function authIsAuthenticated(): Promise<boolean> {
   return invoke<boolean>("auth_is_authenticated");
 }
 
+/** Reabre a sessão de quem marcou "manter conectado"; `null` = pedir login. */
+export async function authRestoreSession(): Promise<AuthPayload | null> {
+  return invoke<AuthPayload | null>("auth_restore_session");
+}
+
+// ---------------------------------------------------------------------------
+// Iniciar com o sistema
+// ---------------------------------------------------------------------------
+
+export async function autostartIsEnabled(): Promise<boolean> {
+  return invoke<boolean>("autostart_is_enabled");
+}
+
+/** Devolve o estado que o SO registrou depois da operação. */
+export async function autostartSetEnabled(enabled: boolean): Promise<boolean> {
+  return invoke<boolean>("autostart_set_enabled", { enabled });
+}
+
 // ---------------------------------------------------------------------------
 // Anotações dentro de tarefas
 // ---------------------------------------------------------------------------

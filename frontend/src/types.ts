@@ -118,16 +118,21 @@ export interface AuthPayload {
   username: string;
   created_at: string;
   authenticated: boolean;
+  /** Sessão lembrada ("manter conectado"). `false` com `remember` pedido =
+   *  cofre do Windows indisponível. */
+  remembered: boolean;
 }
 
 export interface RegisterPayload {
   username: string;
   password: string;
+  remember: boolean;
 }
 
 export interface LoginPayload {
   username: string;
   password: string;
+  remember: boolean;
 }
 
 // ---------------------------------------------------------------------------

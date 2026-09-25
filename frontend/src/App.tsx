@@ -5,6 +5,7 @@ import { AuthPanel } from "./components/AuthPanel";
 import { NoteCard } from "./components/NoteCard";
 import { TaskWindowApp } from "./components/TaskWindowApp";
 import { ThemeToggle } from "./components/ThemeToggle";
+import { StartupToggle } from "./components/StartupToggle";
 import { UpdateToast } from "./components/UpdateToast";
 import type { AuthPayload, Note } from "./types";
 import * as api from "./api";
@@ -351,29 +352,26 @@ function MainApp() {
   const [tab, setTab] = useState<Tab>("notes");
   const [authUser, setAuthUser] = useState<AuthPayload | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    // Rede de segurança: se o backend não responder, cai no login em vez de
+    // ficar no esqueleto para sempre. A restauração verifica um hash Argon2
+    // (dezenas de ms), então 3 s é folga larga.
     const timeout = setTimeout(() => {
       if (!cancelled) {
-        console.warn("authIsAuthenticated timeout — fallback para AuthPanel");
+        console.warn("authRestoreSession timeout — fallback para AuthPanel");
         setAuthLoading(false);
       }
     }, 3000);
     (async () => {
       try {
-        const authed = await api.authIsAuthenticated();
-        if (!cancelled) {
-          if (!authed) setAuthUser(null);
-          else {
-            // Sessão válida mas sem detalhe de usuário — tenta restaurar via login é necessário?
-            // Mostra AuthPanel para login; se houver sessão, o backend já permite operações.
-            // Para evitar tela vazia, mantém null até login mas sai do loading.
-            setAuthUser(null);
-          }
-        }
+        // "Manter conectado": reabre a sessão lembrada, se houver.
+        const restored = await api.authRestoreSession();
+        if (!cancelled) setAuthUser(restored);
       } catch (e) {
-        console.error("authIsAuthenticated falhou:", e);
+        console.error("authRestoreSession falhou:", e);
         if (!cancelled) setAuthUser(null);
       } finally {
         if (!cancelled) {
@@ -392,10 +390,12 @@ function MainApp() {
     try {
       await api.authLogout();
       setAuthUser(null);
+      setAuthNotice(null);
       setTab("notes");
-    } catch {
-      // falha de logout não bloqueia UI
-      setAuthUser(null);
+    } catch (e) {
+      // Não finge que saiu: com "manter conectado", um logout que falhou pode
+      // deixar a sessão lembrada valendo, e o app reabriria logado.
+      setAuthNotice(`Não foi possível sair completamente: ${String(e)}. Tente de novo.`);
     }
   };
 
@@ -415,7 +415,16 @@ function MainApp() {
   if (!authUser) {
     return (
       <>
-        <AuthPanel onAuthenticated={(u) => setAuthUser(u)} />
+        <AuthPanel
+          onAuthenticated={(u, rememberFailed) => {
+            setAuthUser(u);
+            setAuthNotice(
+              rememberFailed
+                ? "Não foi possível guardar a sessão no Gerenciador de Credenciais — você precisará entrar de novo na próxima abertura."
+                : null,
+            );
+          }}
+        />
         <UpdateToast />
       </>
     );
@@ -478,6 +487,7 @@ function MainApp() {
         </div>
 
         <div className="md-nav-right">
+          <StartupToggle />
           <ThemeToggle />
           <span className="md-nav-sep" aria-hidden>•</span>
           <span className="md-nav-user">
@@ -494,6 +504,15 @@ function MainApp() {
           </button>
         </div>
       </nav>
+
+      {authNotice && (
+        <div role="status" className="md-alert">
+          {authNotice}
+          <button type="button" className="md-alert-dismiss" onClick={() => setAuthNotice(null)}>
+            Fechar
+          </button>
+        </div>
+      )}
 
       <div style={{ flex:1, minHeight:0, display:"flex", flexDirection:"column" }}>
         {tab === "notes" ? (

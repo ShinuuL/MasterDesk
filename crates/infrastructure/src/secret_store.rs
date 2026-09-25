@@ -41,12 +41,16 @@ pub enum SecretKey {
     /// de curta duração e fica em memória, então um vazamento do cofre não
     /// entrega uma sessão imediatamente utilizável sem o endpoint.
     MastersysRefreshToken,
+    /// Sessão lembrada da conta local ("manter conectado"), no formato
+    /// `<id>.<segredo>`. O banco guarda só o hash do segredo.
+    LocalSessionToken,
 }
 
 impl SecretKey {
     fn account(&self) -> &'static str {
         match self {
             SecretKey::MastersysRefreshToken => "mastersys.refresh_token",
+            SecretKey::LocalSessionToken => "local.session_token",
         }
     }
 }
@@ -109,7 +113,10 @@ mod tests {
     fn secret_keys_have_distinct_accounts() {
         // Uma chave nova com o mesmo `account()` sobrescreveria a anterior em
         // silêncio; este teste falha se alguém duplicar o identificador.
-        let all = [SecretKey::MastersysRefreshToken];
+        let all = [
+            SecretKey::MastersysRefreshToken,
+            SecretKey::LocalSessionToken,
+        ];
         let mut accounts: Vec<&str> = all.iter().map(|k| k.account()).collect();
         accounts.sort_unstable();
         let total = accounts.len();

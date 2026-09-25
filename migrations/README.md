@@ -40,6 +40,8 @@ depois de criar o arquivo, considere imutável.
 | `0007_mastersys_status_catalog.sql` | Catálogo de status espelhado do Mastersys |
 | `0008_external_status_parked.sql` | `tasks.external_status_parked` |
 | `0009_task_window_state.sql` | Geometria do pop-out de tarefa |
+| `0010_roles_and_ticket_link.sql` | Papéis analista/atendente + vínculo manual com chamado |
+| `0011_remembered_sessions.sql` | Sessão local lembrada ("manter conectado") |
 
 ## Nomes que não podem mudar
 

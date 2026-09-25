@@ -1,5 +1,6 @@
 //! Wiring do app Tauri — Fase 2 (Local Notes) + Fase 3 (Tasks/Notificações).
 
+pub mod autostart;
 pub mod commands;
 pub mod realtime_supervisor;
 pub mod sync_scheduler;
@@ -26,7 +27,13 @@ pub fn run() {
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     let builder = builder
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init());
+        .plugin(tauri_plugin_process::init())
+        // Sem argumentos extras: aberto pelo login do Windows, o app se
+        // comporta como aberto pelo atalho. `LaunchAgent` só vale no macOS.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ));
 
     builder
         .setup(|app| {
@@ -261,6 +268,9 @@ pub fn run() {
             commands::auth_login,
             commands::auth_logout,
             commands::auth_is_authenticated,
+            commands::auth_restore_session,
+            autostart::autostart_is_enabled,
+            autostart::autostart_set_enabled,
             commands::add_task_note,
             commands::list_task_notes,
             commands::count_task_notes,

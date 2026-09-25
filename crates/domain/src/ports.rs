@@ -108,6 +108,20 @@ pub trait AuthenticationProvider: Send + Sync {
 
     /// True se há uma sessão autenticada ativa em memória.
     async fn is_authenticated(&self) -> DomainResult<bool>;
+
+    /// "Manter conectado": grava a sessão atual para sobreviver ao fechamento
+    /// do app. `Ok(false)` quando não há onde gravar com segurança (cofre do
+    /// SO indisponível) — a sessão em memória continua valendo, só não é
+    /// lembrada. `logout` apaga o que for gravado aqui.
+    async fn remember_session(&self) -> DomainResult<bool>;
+
+    /// Reabre a sessão lembrada, se houver e ainda for válida. `Ok(None)` é o
+    /// estado normal de quem nunca marcou "manter conectado".
+    async fn restore_session(&self) -> DomainResult<Option<User>>;
+
+    /// Apaga a sessão lembrada sem encerrar a sessão em memória. Usado quando
+    /// alguém entra com "manter conectado" desmarcado.
+    async fn forget_remembered_session(&self) -> DomainResult<()>;
 }
 
 /// Integração com sistema de suporte (Mastersys ou futuro).

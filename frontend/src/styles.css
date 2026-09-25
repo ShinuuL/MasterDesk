@@ -299,6 +299,15 @@ button:focus-visible, a:focus-visible{outline-offset:2px}
   background:var(--accent); color:var(--accent-ink);
 }
 .md-theme-btn svg{display:block}
+.md-theme-btn:disabled{cursor:default; opacity:.55}
+/* Falha ao ler/alterar a inicialização automática: o detalhe fica no title. */
+.md-theme-btn[data-error="true"]{color:var(--danger); box-shadow:inset 0 0 0 1px var(--danger)}
+
+/* Texto só para leitor de tela. */
+.md-sr-only{
+  position:absolute; width:1px; height:1px; overflow:hidden;
+  clip:rect(0 0 0 0); white-space:nowrap;
+}
 
 /* ---------------------------------------------------------------------------
    Headers de board
