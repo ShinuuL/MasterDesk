@@ -1,7 +1,9 @@
 # ADR-011 — Sessão lembrada ("manter conectado") e iniciar com o sistema
 
-**Status:** Proposto (2026-09-25) — implementado, **aguarda compilação/testes Rust
-e validação no Windows** (a máquina em que foi escrito não tinha o linker MSVC).
+**Status:** Proposto (2026-09-25) — implementado, compilado e com `cargo test
+--workspace` verde (214 testes, incluindo o roundtrip no Credential Manager
+real). **Aguarda validação manual no Windows** (reabrir logado, reiniciar o PC
+com autostart ligado).
 
 ## Contexto
 
@@ -73,7 +75,7 @@ Port `AuthenticationProvider` ganhou `remember_session`, `restore_session` e
   antes de instalar a versão de release.
 - A proteção da conta local continua sendo de interface: os comandos de dados
   não conferem sessão (achado registrado na auditoria de 2026-09-25).
-- Pendente de validação: compilar e rodar `cargo test` (10 testes novos em
-  `local_auth_repository.rs`, 3 em `auth.rs`), testar no Windows ligar/desligar,
-  reiniciar e conferir o Gerenciador de Tarefas → Aplicativos de inicialização.
+- Testes: 10 novos em `local_auth_repository.rs` e 3 em `auth.rs`, todos
+  passando. Pendente: testar no Windows ligar/desligar o autostart, reiniciar
+  e conferir o Gerenciador de Tarefas → Aplicativos de inicialização.
   macOS/Linux não validados.
