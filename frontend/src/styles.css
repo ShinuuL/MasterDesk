@@ -439,6 +439,10 @@ input[type="checkbox"]{accent-color:var(--accent)}
   background:color-mix(in srgb, var(--ok) 12%, var(--surface));
   border-color:color-mix(in srgb, var(--ok) 40%, var(--surface));
 }
+/* Aviso sob um campo (ex.: endereço do Mastersys sem https). */
+.md-field-warn{
+  margin:4px 0 0; font-size:12px; line-height:1.4; color:var(--warn);
+}
 .md-alert-dismiss{
   margin-left:8px; background:transparent; border:none;
   text-decoration:underline; cursor:pointer; color:inherit; font-size:12px;

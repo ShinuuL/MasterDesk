@@ -74,10 +74,27 @@ pub fn run() {
                 //
                 // `foreign_keys(true)`: SQLite desliga FK por conexão. Sem isso o
                 // ON DELETE CASCADE de `task_notes` (migration 0005) seria ignorado.
+                //
+                // WAL + `synchronous=NORMAL` (decisão do DEV em 2026-09-25):
+                // o sqlx 0.8 não liga WAL sozinho (fica no DELETE padrão do
+                // SQLite, com `synchronous=FULL`), e aí a sincronização em
+                // segundo plano e as escritas da UI disputam o lock do arquivo
+                // inteiro. Com WAL, leitura não bloqueia escrita. NORMAL é
+                // seguro contra queda do app; numa queda de energia pode
+                // perder a última transação, nunca corromper o banco.
+                //
+                // RISCO ACEITO: WAL não funciona em sistema de arquivos de
+                // rede. `%APPDATA%` é Roaming e, com redirecionamento de pasta
+                // corporativo, pode estar num compartilhamento. Se alguém
+                // relatar "database is locked" ou o app não abrir nessa
+                // configuração, é a primeira suspeita. O modo fica gravado no
+                // arquivo: voltar exige `journal_mode(Delete)` aqui.
                 let opts = SqliteConnectOptions::new()
                     .filename(&db_path)
                     .create_if_missing(true)
-                    .foreign_keys(true);
+                    .foreign_keys(true)
+                    .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+                    .synchronous(sqlx::sqlite::SqliteSynchronous::Normal);
                 let pool = sqlx::SqlitePool::connect_with(opts)
                     .await
                     .expect("failed to connect sqlite");

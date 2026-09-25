@@ -51,6 +51,18 @@ function describeReport(report: SyncReport): { label: string; value: number }[] 
   ].filter((row) => row.value > 0);
 }
 
+/** `http://` fora da própria máquina. Loopback fica de fora: é o caso de
+ *  desenvolvimento, e o tráfego não sai do computador. */
+function isInsecureEndpoint(raw: string): boolean {
+  try {
+    const url = new URL(raw.trim());
+    if (url.protocol !== "http:") return false;
+    return !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 export function MastersysPanel({ onClose, onTasksChanged }: Props) {
   // Diagnóstico da sincronização automática. Sem isto o usuário não consegue
   // distinguir "está demorando" de "não está acontecendo", porque a falha do
@@ -70,6 +82,7 @@ export function MastersysPanel({ onClose, onTasksChanged }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [report, setReport] = useState<SyncReport | null>(null);
   const panelRef = useRef<HTMLElement>(null);
+  const insecureEndpoint = isInsecureEndpoint(endpoint);
 
   // `role="dialog" aria-modal="true"` cria a expectativa de fechar no Escape e
   // de o foco entrar no painel. Sem isso, quem navega por teclado abre o painel
@@ -289,7 +302,17 @@ export function MastersysPanel({ onClose, onTasksChanged }: Props) {
                     placeholder="https://suporte.suaempresa.com"
                     autoComplete="off"
                     spellCheck={false}
+                    aria-describedby={insecureEndpoint ? "ms-endpoint-warn" : undefined}
                   />
+                  {/* http continua permitido (decisão do DEV em 2026-09-25,
+                      para servidores internos), mas não em silêncio: senha e
+                      tokens trafegam sem criptografia nesse caso. */}
+                  {insecureEndpoint && (
+                    <p id="ms-endpoint-warn" className="md-field-warn" role="note">
+                      Endereço sem https: usuário, senha e sessão trafegam sem
+                      criptografia. Use só em rede interna confiável.
+                    </p>
+                  )}
                 </div>
                 <button
                   className="md-btn"
