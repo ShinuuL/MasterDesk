@@ -471,9 +471,11 @@ pub async fn open_note_window(
         return Ok(());
     }
 
+    // Só em dev, e sem o título: é conteúdo do usuário (CLAUDE §18).
+    #[cfg(debug_assertions)]
     println!(
-        "open_note_window: id={} title={} x={} y={} w={} h={}",
-        id, title, x, y, w, h
+        "open_note_window: id={} x={} y={} w={} h={}",
+        id, x, y, w, h
     );
 
     // P2 — URL UNIFICADA via WebviewUrl::App em dev E prod (removido o
@@ -484,6 +486,7 @@ pub async fn open_note_window(
     // initialization_script NÃO roda em WebviewUrl::External (wry/tauri).
     // App.tsx já lê search + hash + window.__NOTE_ID__ (fallback).
     let url = WebviewUrl::App(format!("/index.html#note={}", id).into());
+    #[cfg(debug_assertions)]
     println!("open_note_window url: {:?}", url);
 
     // Sanitiza o id para o initialization_script: serde_json::to_string produz

@@ -21,10 +21,17 @@ export function NotesBoard() {
     setPoppedOut(next);
   };
 
-  const refresh = async () => {
+  /**
+   * `silent`: recarga de fundo (volta do foco) não mostra esqueleto nem erro —
+   * mesmo motivo documentado no `refresh` do `TasksBoard`: a lista sumia e
+   * voltava a cada alt-tab.
+   */
+  const refresh = async ({ silent = false }: { silent?: boolean } = {}) => {
     try {
-      setLoading(true);
-      setError(null);
+      if (!silent) {
+        setLoading(true);
+        setError(null);
+      }
       const data = showArchived ? await api.listArchivedNotes() : await api.listActiveNotes();
       setNotes(data);
 
@@ -44,11 +51,15 @@ export function NotesBoard() {
         setPoppedOutBoth(new Set());
       }
     } catch (e) {
-      setError(String(e));
+      if (!silent) setError(String(e));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
+  // O listener de foco é registrado uma vez só; sem a ref ele chamaria o
+  // `refresh` da primeira renderização, com `showArchived` congelado.
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
 
   useEffect(() => {
     refresh();
@@ -64,9 +75,11 @@ export function NotesBoard() {
       try {
         const win = (await import("@tauri-apps/api/window")).getCurrentWindow();
         const un = await win.onFocusChanged(({ payload }) => {
-          if (payload && !cancelled) refresh();
+          if (payload && !cancelled) void refreshRef.current({ silent: true });
         });
+        // Desmontou durante o `await`: remove já, senão o listener vaza.
         if (!cancelled) unlisten = un;
+        else un();
       } catch {
         // fora do Tauri (browser/dev puro) — ignora
       }

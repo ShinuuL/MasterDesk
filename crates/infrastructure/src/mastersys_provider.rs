@@ -149,6 +149,18 @@ impl MastersysProvider {
                 "endereço deve começar com http:// ou https://".into(),
             ));
         }
+        // Origem nova (esquema + host + porta) = servidor novo: desconecta
+        // ANTES de gravar. Sem isso o próximo request levaria o Bearer — e o
+        // 401 seguinte, o refresh token — para um host digitado errado.
+        // Mesmo host com outro caminho não desconecta: o token não sai dele.
+        let previous = self.base_url().await?;
+        let origin_changed = previous
+            .as_deref()
+            .and_then(|p| reqwest::Url::parse(p).ok())
+            .is_some_and(|old| old.origin() != parsed.origin());
+        if origin_changed {
+            SupportSystemProvider::sign_out(self).await?;
+        }
         self.settings.set(SettingKey::MastersysBaseUrl, url).await
     }
 

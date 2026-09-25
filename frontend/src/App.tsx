@@ -148,7 +148,6 @@ function NoteWindowApp({ noteId }: { noteId: string }) {
       try {
         console.log("NoteWindow: fetching", noteId);
         const n = await api.getNote(noteId);
-        console.log("NoteWindow: got", n);
         if (!cancelled) setNote(n);
       } catch (e) {
         console.error("getNote falhou:", e);

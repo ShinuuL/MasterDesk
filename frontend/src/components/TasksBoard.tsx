@@ -498,7 +498,7 @@ export function TasksBoard({ view }: Props) {
         deadline: item.deadline ?? undefined,
       });
       setRemoteResults(null);
-      await refresh();
+      await refresh({ silent: true });
     } catch (e) {
       setError(String(e));
     }
@@ -513,10 +513,13 @@ export function TasksBoard({ view }: Props) {
     });
   };
 
+  // Depois de uma ação do usuário a recarga é silenciosa: o erro da AÇÃO já
+  // aparece pelo `catch` de cada handler, e o esqueleto no lugar da lista
+  // faria o quadro piscar e perder a rolagem a cada clique.
   const handleComplete = async (id: string) => {
     try {
       await api.completeTask(id);
-      await refresh();
+      await refresh({ silent: true });
     } catch (e) {
       setError(String(e));
     }
@@ -525,7 +528,7 @@ export function TasksBoard({ view }: Props) {
   const handleReopen = async (id: string) => {
     try {
       await api.reopenTask(id);
-      await refresh();
+      await refresh({ silent: true });
     } catch (e) {
       setError(String(e));
     }
@@ -540,7 +543,7 @@ export function TasksBoard({ view }: Props) {
     if (!confirm(warning)) return;
     try {
       await api.deleteTask(task.id);
-      await refresh();
+      await refresh({ silent: true });
     } catch (e) {
       setError(String(e));
     }
@@ -1066,7 +1069,7 @@ export function TasksBoard({ view }: Props) {
             setCreating(null);
             setLinkSeed(null);
           }}
-          onCreated={() => void refresh()}
+          onCreated={() => void refresh({ silent: true })}
         />
       )}
 
@@ -1076,14 +1079,14 @@ export function TasksBoard({ view }: Props) {
           catalog={catalog}
           parked={isParked(ticketOf)}
           onClose={() => setTicketOf(null)}
-          onLinkChanged={() => void refresh()}
+          onLinkChanged={() => void refresh({ silent: true })}
         />
       )}
 
       {showMastersys && (
         <MastersysPanel
           onClose={() => setShowMastersys(false)}
-          onTasksChanged={() => void refresh()}
+          onTasksChanged={() => void refresh({ silent: true })}
         />
       )}
     </div>
