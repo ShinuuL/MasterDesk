@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import type { AuthPayload } from "../types";
 import * as api from "../api";
+import appIcon from "../assets/app-icon.png";
 
 type Mode = "login" | "register";
 
@@ -63,28 +64,26 @@ export function AuthPanel({ onAuthenticated }: AuthPanelProps) {
 
   return (
     <div style={{ height: "100vh", display: "grid", placeItems: "center", background: "var(--canvas)" }}>
-      <div style={{ width: 360, background: "var(--surface-plain)", border: "1px solid var(--line-strong)", borderRadius: "var(--radius-lg)", boxShadow: "var(--shadow-lg)", overflow: "hidden" }}>
-        <div style={{ padding: "22px 24px", display: "flex", alignItems: "center", gap: 12, borderBottom: "1px solid var(--line)", background: "var(--chrome)", color: "var(--chrome-text)" }}>
-          <div style={{ width: 40, height: 40, borderRadius: 10, background: "var(--accent)", color: "var(--text)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 16 }} aria-hidden>
-            MD
-          </div>
-          <div>
-            <div style={{ fontWeight: 700, letterSpacing: "-.02em", fontSize: 15 }}>MasterNote</div>
-            <div style={{ fontSize: 11, opacity: 0.7, textTransform: "uppercase", letterSpacing: ".06em" }}>notas • tarefas • foco</div>
-          </div>
-        </div>
-
-        <div style={{ padding: "22px 24px" }}>
-          <h1 style={{ margin: "0 0 4px", fontSize: 18, letterSpacing: "-.02em", fontWeight: 750 }}>
-            {mode === "login" ? "Entrar" : "Criar conta"}
+      <div style={{ width: 360, background: "var(--surface-plain)", borderRadius: 18, boxShadow: "var(--shadow-lg)", overflow: "hidden" }}>
+        <div style={{ padding: "32px 28px 24px", textAlign: "center" }}>
+          {/* O ícone real do app, o mesmo da janela e do instalador. */}
+          <img
+            src={appIcon}
+            alt=""
+            width={72}
+            height={72}
+            style={{ borderRadius: 16, boxShadow: "var(--shadow-md)", marginBottom: 14 }}
+          />
+          <h1 style={{ margin: "0 0 4px", fontSize: 22, letterSpacing: "-.02em", fontWeight: 700 }}>
+            {mode === "login" ? "Entrar no MasterNote" : "Criar conta"}
           </h1>
-          <p style={{ margin: "0 0 18px", fontSize: 13, color: "var(--text-muted)" }}>
+          <p style={{ margin: "0 0 20px", fontSize: 13, color: "var(--text-muted)" }}>
             {mode === "login"
               ? "Acesse sua mesa de trabalho local."
               : "Sua conta fica apenas neste dispositivo — sem nuvem."}
           </p>
 
-          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12, textAlign: "left" }}>
             <div className="md-field">
               <label htmlFor="auth-username" style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--text-muted)" }}>
                 Usuário

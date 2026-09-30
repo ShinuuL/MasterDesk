@@ -173,3 +173,26 @@ escreve em `element.style` pelo CSSOM, que a CSP não governa.
 A alternativa a `'unsafe-inline'` seria um hash `'sha256-…'` do bloco. Foi
 rejeitada por fragilidade: qualquer edição no CSS do fundo invalida o hash e
 traz o flash de volta sem erro visível.
+
+## Adendo (2026-09-30) — redesenho: linguagem Apple, barra lateral e Kanban
+
+Aprovado pelo DEV sobre protótipo navegável. O mecanismo deste ADR não muda
+(tokens por papel em `styles.css`, `data-theme` no `<html>`); mudam os valores
+e a casca:
+
+- **Paleta:** cinzas neutros (`#F5F5F7` / `#1C1C1E`), um único azul de ação
+  (`#0071E3` / `#0A84FF`), cantos de 8–12 px, sombras suaves. O amarelo de
+  post-it saiu do chrome; continua nas notas.
+- **Fonte:** a do sistema (`-apple-system`, Segoe UI Variable). Nenhum ativo
+  proprietário da Apple é usado.
+- **Contraste:** prioridades viraram selos tingidos (texto na cor, fundo a 14%);
+  os tons foram escolhidos para ≥ 4,5:1 nos dois temas — antes o texto branco
+  sobre laranja/azul claro ficava entre 2,3 e 3,6:1.
+- **Casca:** barra lateral (Quadro / Chamados / Notas, tema, iniciar com o
+  Windows, sair) no lugar das abas do topo; quadro Kanban com painel de detalhe
+  flutuante. A coluna do quadro é só local (`tasks.board_column`, migration 0012).
+- **Ícone:** a barra lateral e o login usam `frontend/src/assets/app-icon.png`,
+  cópia em 128 px de `src-tauri/icons/icon.png`. Trocar o ícone exige
+  regenerar a cópia.
+- **Pendente:** arrastar e soltar entre colunas (o WebView2 do Tauri intercepta
+  o drag por padrão — verificar `dragDropEnabled` antes de implementar).

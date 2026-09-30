@@ -1,85 +1,94 @@
 /* MasterNote — design system
    ===========================================================================
-   Identidade: "warm desk". No claro, papel morno (#FDFCF8) sobre uma mesa
-   levemente mais fria (#F6F5F1), tinta quase-preta e um único acento amarelo
-   de post-it. No escuro, a MESMA mesa sob uma lâmpada: carvão morno em vez de
-   cinza-azulado, e o amarelo continua sendo a única fonte de luz.
+   Identidade (redesenho de 2026-09-30, aprovado pelo DEV): linguagem inspirada
+   nas diretrizes de interface da Apple — cinzas neutros, um único azul de
+   ação, cantos de 10–12 px, sombras suaves, barra lateral clara e controles
+   segmentados. Nada de ativo proprietário: a fonte é a do sistema (Segoe UI
+   Variable no Windows, San Francisco no Mac).
 
-   O tema escuro não é o claro invertido. `--ink` era, ao mesmo tempo, a cor do
-   texto E o fundo da barra de navegação e dos botões sólidos. Invertido, isso
-   produziria nav branca e botão branco-no-branco. Por isso os tokens abaixo
-   são divididos por PAPEL, não por valor:
+   Tokens divididos por PAPEL, não por valor — o tema escuro troca só estes
+   valores, nenhum componente tem regra própria de tema:
 
      texto        --text --text-muted --text-faint
-     superfícies  --canvas --surface --surface-2
+     superfícies  --canvas --surface --surface-plain --surface-2
      traços       --line --line-strong
-     chrome       --chrome --chrome-text  (nav: escura nos DOIS temas — é a
-                  faixa que faz o app ser reconhecível)
+     chrome       --chrome --chrome-text  (barra lateral)
      ação         --action --action-text  (botão sólido)
      acento       --accent --accent-ink --accent-veil
 
-   Tipografia: system-ui em 11/12/13/14/16/20 com tracking apertado nos
-   títulos, mais um papel monoespaçado para horário, número de chamado e
-   contadores — suporte/ERP é feito de identificadores, e alinhá-los em
-   tabular ajuda a varrer a lista.
+   Contraste: os tons de prioridade e estado são usados como TEXTO sobre
+   fundo claro/escuro (selos tingidos), e todos passam 4,5:1.
    =========================================================================== */
 
 :root{
   color-scheme: light;
 
   /* Texto */
-  --text:#0F1115;
+  --text:#1D1D1F;
   --text-strong:#000;
-  --text-muted:#6B7280;
-  --text-faint:#9AA0A6;
+  --text-muted:#6E6E73;
+  --text-faint:#86868B;
 
   /* Superfícies */
-  --canvas:#F6F5F1;
-  --canvas-dot:#E8E6E1;
-  --surface:#FDFCF8;
+  --canvas:#F5F5F7;
+  --canvas-dot:#E5E5EA;
+  --surface:#FFFFFF;
   --surface-plain:#FFFFFF;
-  --surface-2:#F2F1EC;
+  --surface-2:#F2F2F7;
 
   /* Traços */
-  --line:#E8E6E1;
-  --line-strong:#DAD8D3;
+  --line:#E5E5EA;
+  --line-strong:#D1D1D6;
 
-  /* Chrome (nav) — escura nos dois temas */
-  --chrome:#0F1115;
-  --chrome-text:#FFFFFF;
-  --chrome-line:rgba(255,255,255,.10);
-  --chrome-line-hover:rgba(255,255,255,.24);
-  --chrome-text-dim:rgba(255,255,255,.66);
+  /* Chrome (barra lateral) */
+  --chrome:#ECECF0;
+  --chrome-text:#1D1D1F;
+  --chrome-line:rgba(0,0,0,.10);
+  --chrome-line-hover:rgba(0,0,0,.20);
+  --chrome-text-dim:#6E6E73;
+  --chrome-hover:rgba(0,0,0,.05);
+  --chrome-active:rgba(0,113,227,.12);
+  --chrome-active-text:#0058B0;
+
+  /* Controles de preenchimento (campo de busca, segmentado) */
+  --fill:rgba(118,118,128,.12);
+  --fill-strong:rgba(118,118,128,.2);
 
   /* Ação sólida */
-  --action:#0F1115;
-  --action-hover:#1C1F26;
+  --action:#0071E3;
+  --action-hover:#0062C4;
   --action-text:#FFFFFF;
-  --action-disabled:#D1D5DB;
+  --action-disabled:#D1D1D6;
 
   /* Acento */
-  --accent:#FFEB3B;
-  --accent-ink:#0F1115;
-  --accent-veil:rgba(255,235,59,.18);
+  --accent:#0071E3;
+  --accent-ink:#FFFFFF;
+  --accent-veil:rgba(0,113,227,.12);
+  --link:#0066CC;
 
   /* Estados */
-  --danger:#B91C1C;
-  --danger-strong:#991B1B;
-  --danger-surface:#FEF2F2;
-  --danger-line:#FECACA;
-  --danger-mark:#DC2626;
-  --warn:#92400E;
-  --warn-surface:#FFFEF7;
-  --warn-mark:#F59E0B;
-  --ok:#15803D;
-  --overdue-surface:#FFFBFB;
+  --danger:#D70015;
+  --danger-strong:#A50011;
+  --danger-surface:#FFF1F0;
+  --danger-line:#FFC9C5;
+  --danger-mark:#FF3B30;
+  --warn:#A34700;
+  --warn-surface:#FFF8EC;
+  --warn-mark:#FF9500;
+  --ok:#248A3D;
+  --overdue-surface:#FFF7F7;
 
-  /* Prioridades — usadas também pelo TS via getComputedStyle não é
-     necessário; ficam aqui para os cards e badges do CSS. */
-  --prio-low:#6B7280;
-  --prio-medium:#3B5BFF;
-  --prio-high:#EA580C;
-  --prio-urgent:#DC2626;
+  /* Prioridades — texto sobre fundo tingido; todas ≥ 4,5:1 no branco. */
+  --prio-low:#6E6E73;
+  --prio-medium:#0066CC;
+  --prio-high:#B84A00;
+  --prio-urgent:#D70015;
+
+  /* Colunas do quadro (só o ponto ao lado do título) */
+  --col-todo:#8E8E93;
+  --col-doing:#0071E3;
+  --col-waiting:#FF9500;
+  --col-done:#34C759;
 
   /* Forma */
   --radius-sm:8px;
@@ -88,81 +97,87 @@
   --radius-pill:999px;
 
   /* Profundidade */
-  --shadow-xs:0 1px 2px rgba(15,17,21,.05);
-  --shadow-sm:0 1px 3px rgba(15,17,21,.07), 0 1px 2px rgba(15,17,21,.06);
-  --shadow-md:0 4px 16px rgba(15,17,21,.08), 0 2px 6px rgba(15,17,21,.06);
-  --shadow-lg:0 12px 32px rgba(15,17,21,.13), 0 4px 12px rgba(15,17,21,.09);
-  --inset-top:inset 0 1px 0 rgba(255,255,255,.9);
-  --inset-bottom:inset 0 -1px 0 rgba(15,17,21,.04);
+  --shadow-xs:0 1px 2px rgba(0,0,0,.05);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.06), 0 0 0 .5px rgba(0,0,0,.08);
+  --shadow-md:0 4px 14px rgba(0,0,0,.08), 0 0 0 .5px rgba(0,0,0,.08);
+  --shadow-lg:0 20px 50px rgba(0,0,0,.18), 0 0 0 .5px rgba(0,0,0,.1);
+  --inset-top:inset 0 0 0 0 transparent;
+  --inset-bottom:inset 0 0 0 0 transparent;
 
-  --focus:0 0 0 3px rgba(255,235,59,.55), 0 0 0 4px var(--text);
+  --focus:0 0 0 3px rgba(0,113,227,.45);
 
   --font-mono:ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
 }
 
-/* Tema escuro. Só os tokens mudam — nenhum componente tem regra própria de
-   tema, o que impede o par claro/escuro de divergir com o tempo. */
+/* Tema escuro. Só os tokens mudam. */
 :root[data-theme="dark"]{
   color-scheme: dark;
 
-  --text:#F2F0EA;
+  --text:#F5F5F7;
   --text-strong:#FFFFFF;
-  --text-muted:#A0A0A0;
-  --text-faint:#6F7075;
+  --text-muted:#A1A1A6;
+  --text-faint:#8E8E93;
 
-  --canvas:#101113;
-  --canvas-dot:#25262A;
-  --surface:#191A1D;
-  --surface-plain:#1E1F23;
-  --surface-2:#232428;
+  --canvas:#161618;
+  --canvas-dot:#2C2C2E;
+  --surface:#1C1C1E;
+  --surface-plain:#2C2C2E;
+  --surface-2:#2C2C2E;
 
-  --line:#2B2D31;
-  --line-strong:#3A3C41;
+  --line:#38383A;
+  --line-strong:#48484A;
 
-  /* Um degrau MAIS escuro que o canvas: no escuro, chrome mais clara pareceria
-     um painel flutuante, não a moldura do app. */
-  --chrome:#08090A;
-  --chrome-text:#F2F0EA;
-  --chrome-line:rgba(255,255,255,.09);
+  --chrome:#232325;
+  --chrome-text:#F5F5F7;
+  --chrome-line:rgba(255,255,255,.10);
   --chrome-line-hover:rgba(255,255,255,.22);
-  --chrome-text-dim:rgba(242,240,234,.60);
+  --chrome-text-dim:#A1A1A6;
+  --chrome-hover:rgba(255,255,255,.06);
+  --chrome-active:rgba(10,132,255,.25);
+  --chrome-active-text:#FFFFFF;
 
-  /* Botão sólido não pode ser quase-preto sobre fundo escuro: aqui o papel de
-     "ação" passa para o acento, que é o único elemento luminoso do tema. */
-  --action:#FFEB3B;
-  --action-hover:#FFF176;
-  --action-text:#0F1115;
-  --action-disabled:#3A3C41;
+  --fill:rgba(118,118,128,.24);
+  --fill-strong:rgba(118,118,128,.36);
 
-  --accent:#FFEB3B;
-  --accent-ink:#0F1115;
-  --accent-veil:rgba(255,235,59,.14);
+  --action:#0A84FF;
+  --action-hover:#409CFF;
+  --action-text:#FFFFFF;
+  --action-disabled:#48484A;
 
-  --danger:#F87171;
-  --danger-strong:#FCA5A5;
-  --danger-surface:#2A1618;
-  --danger-line:#5B2326;
-  --danger-mark:#EF4444;
-  --warn:#FBBF24;
-  --warn-surface:#241E10;
-  --warn-mark:#D97706;
-  --ok:#4ADE80;
-  --overdue-surface:#231517;
+  --accent:#0A84FF;
+  --accent-ink:#FFFFFF;
+  --accent-veil:rgba(10,132,255,.22);
+  --link:#4DA3FF;
 
-  --prio-low:#8B8D93;
-  --prio-medium:#7C93FF;
-  --prio-high:#FB923C;
-  --prio-urgent:#F87171;
+  --danger:#FF6961;
+  --danger-strong:#FF9A94;
+  --danger-surface:#2E1716;
+  --danger-line:#5C2522;
+  --danger-mark:#FF453A;
+  --warn:#FFB340;
+  --warn-surface:#2B2111;
+  --warn-mark:#FF9F0A;
+  --ok:#30D158;
+  --overdue-surface:#2A1817;
 
-  /* No escuro a sombra some; o que separa camadas é um fio de luz no topo. */
+  --prio-low:#A1A1A6;
+  --prio-medium:#64B5FF;
+  --prio-high:#FFB340;
+  --prio-urgent:#FF6961;
+
+  --col-todo:#98989D;
+  --col-doing:#0A84FF;
+  --col-waiting:#FF9F0A;
+  --col-done:#30D158;
+
   --shadow-xs:0 1px 2px rgba(0,0,0,.5);
-  --shadow-sm:0 1px 3px rgba(0,0,0,.55), 0 1px 2px rgba(0,0,0,.4);
-  --shadow-md:0 6px 20px rgba(0,0,0,.55), 0 2px 6px rgba(0,0,0,.45);
-  --shadow-lg:0 16px 40px rgba(0,0,0,.6), 0 6px 14px rgba(0,0,0,.5);
-  --inset-top:inset 0 1px 0 rgba(255,255,255,.06);
-  --inset-bottom:inset 0 -1px 0 rgba(0,0,0,.35);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.4), 0 0 0 .5px rgba(255,255,255,.08);
+  --shadow-md:0 6px 20px rgba(0,0,0,.5), 0 0 0 .5px rgba(255,255,255,.08);
+  --shadow-lg:0 20px 50px rgba(0,0,0,.6), 0 0 0 .5px rgba(255,255,255,.1);
+  --inset-top:inset 0 0 0 0 transparent;
+  --inset-bottom:inset 0 0 0 0 transparent;
 
-  --focus:0 0 0 3px rgba(255,235,59,.5), 0 0 0 4px #08090A;
+  --focus:0 0 0 3px rgba(10,132,255,.55);
 }
 
 *{box-sizing:border-box}
@@ -171,7 +186,7 @@ body{
   margin:0;
   background:var(--surface);
   color:var(--text);
-  font-family:system-ui, -apple-system, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family:-apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   -webkit-font-smoothing:antialiased;
   text-rendering:optimizeLegibility;
   line-height:1.5;
@@ -188,8 +203,7 @@ button, input, select, textarea{font:inherit; color:inherit}
 
 /* Acessibilidade: foco visível */
 :focus-visible{
-  outline:2px solid var(--text);
-  outline-offset:2px;
+  outline:none;
   box-shadow:var(--focus);
 }
 button:focus-visible, a:focus-visible{outline-offset:2px}
@@ -281,22 +295,22 @@ button:focus-visible, a:focus-visible{outline-offset:2px}
 .md-theme-toggle{
   display:inline-flex; align-items:center;
   padding:2px; gap:2px;
-  border-radius:var(--radius-pill);
-  border:1px solid var(--chrome-line);
-  background:rgba(255,255,255,.04);
+  border-radius:9px;
+  background:var(--fill);
 }
 .md-theme-btn{
   display:grid; place-items:center;
   width:28px; height:24px;
   border:none; background:transparent;
   color:var(--chrome-text-dim);
-  border-radius:var(--radius-pill);
+  border-radius:7px;
   cursor:pointer;
   transition:background .15s ease, color .15s ease;
 }
-.md-theme-btn:hover{color:var(--chrome-text); background:rgba(255,255,255,.08)}
+.md-theme-btn:hover{color:var(--chrome-text)}
 .md-theme-btn[aria-pressed="true"]{
-  background:var(--accent); color:var(--accent-ink);
+  background:var(--surface-plain); color:var(--text);
+  box-shadow:0 1px 3px rgba(0,0,0,.14);
 }
 .md-theme-btn svg{display:block}
 .md-theme-btn:disabled{cursor:default; opacity:.55}
@@ -314,7 +328,7 @@ button:focus-visible, a:focus-visible{outline-offset:2px}
 --------------------------------------------------------------------------- */
 .md-board-header{
   display:flex; gap:10px; align-items:center;
-  padding:10px 14px;
+  min-height:64px; padding:10px 24px;
   background:var(--surface);
   /* Progressive enhancement: onde `color-mix` existe, o header fica
      translúcido sobre o grid de pontos; onde não, fica opaco (nunca some). */
@@ -324,26 +338,21 @@ button:focus-visible, a:focus-visible{outline-offset:2px}
   border-bottom:1px solid var(--line);
   position:sticky; top:0; z-index:5;
 }
-.md-board-title{font-size:14px; letter-spacing:-.02em; font-weight:700}
+.md-board-heading{display:flex; flex-direction:column; min-width:0}
+.md-board-title{margin:0; font-size:20px; letter-spacing:-.02em; font-weight:700; line-height:1.2}
 .md-search{position:relative; flex:0 1 280px; display:flex; align-items:center}
 .md-search input{
   width:100%; padding:8px 10px 8px 32px;
-  border-radius:var(--radius-pill);
-  border:1px solid var(--line-strong);
-  background:var(--surface-plain);
+  border-radius:9px;
+  border:1px solid transparent;
+  background:var(--fill);
   font-size:13px; color:var(--text);
   transition:border-color .15s, box-shadow .15s;
 }
 .md-search input::placeholder{color:var(--text-faint)}
-.md-search input:focus{border-color:var(--text); box-shadow:0 0 0 3px var(--accent-veil)}
+.md-search input:focus{background:var(--surface-plain); border-color:var(--accent); box-shadow:var(--focus)}
 .md-search svg{position:absolute; left:10px; pointer-events:none; opacity:.55}
-.md-count{
-  margin-left:auto;
-  font-size:12px; font-weight:600; letter-spacing:.02em;
-  color:var(--text-muted);
-  background:var(--surface-plain); border:1px solid var(--line);
-  padding:4px 9px; border-radius:var(--radius-pill);
-}
+.md-count{font-size:12px; color:var(--text-muted)}
 
 /* ---------------------------------------------------------------------------
    Barra de criação e campos
@@ -361,14 +370,14 @@ button:focus-visible, a:focus-visible{outline-offset:2px}
 }
 .md-input, .md-select, .md-textarea{
   padding:9px 11px; border-radius:10px;
-  border:1px solid var(--line-strong);
-  background:var(--surface-plain); font-size:13px; color:var(--text);
+  border:1px solid transparent;
+  background:var(--fill); font-size:13px; color:var(--text);
   transition:border-color .15s, box-shadow .15s, background .15s;
   min-height:36px;
 }
 .md-input::placeholder, .md-textarea::placeholder{color:var(--text-faint)}
 .md-input:focus, .md-select:focus, .md-textarea:focus{
-  border-color:var(--text); box-shadow:0 0 0 3px var(--accent-veil); outline:none;
+  background:var(--surface-plain); border-color:var(--accent); box-shadow:var(--focus); outline:none;
 }
 .md-textarea{resize:vertical; line-height:1.5; font-family:inherit}
 .md-primary{
@@ -526,8 +535,10 @@ input[type="checkbox"]{accent-color:var(--accent)}
 .md-task-meta strong{color:var(--text); font-weight:600}
 
 .md-badge{
-  font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
-  padding:2px 7px; border-radius:var(--radius-pill); color:#fff; line-height:1.6;
+  font-size:11px; font-weight:600;
+  padding:2px 8px; border-radius:var(--radius-pill); line-height:1.6;
+  color:var(--badge-ink, var(--text));
+  background:color-mix(in srgb, var(--badge-ink, var(--text)) 14%, transparent);
 }
 .md-due{font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase}
 .md-due--overdue{color:var(--danger)}
@@ -535,18 +546,18 @@ input[type="checkbox"]{accent-color:var(--accent)}
 
 .md-btn-row{margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center}
 .md-btn{
-  padding:7px 12px; border-radius:var(--radius-pill);
-  border:1px solid var(--line-strong); background:var(--surface-plain); color:var(--text);
-  font-size:12px; font-weight:600; cursor:pointer; min-height:32px;
-  transition:all .15s;
+  padding:6px 14px; border-radius:8px;
+  border:none; background:var(--fill); color:var(--text);
+  font-size:13px; font-weight:500; cursor:pointer; min-height:30px;
+  transition:background .15s, color .15s;
 }
-.md-btn:hover{border-color:var(--action); background:var(--action); color:var(--action-text)}
-.md-btn--danger{color:var(--danger); border-color:var(--danger-line); background:var(--surface-plain)}
-.md-btn--danger:hover{background:var(--danger-mark); border-color:var(--danger-mark); color:#fff}
+.md-btn:hover{background:var(--fill-strong)}
+.md-btn--danger{color:var(--danger); background:transparent}
+.md-btn--danger:hover{background:var(--danger-surface)}
 .md-btn--primary{background:var(--action); color:var(--action-text); border-color:var(--action)}
 .md-btn--primary:hover{background:var(--action-hover); border-color:var(--action-hover)}
-.md-btn--ghost{border-color:transparent; background:transparent; color:var(--text-muted)}
-.md-btn--ghost:hover{background:var(--surface-2); color:var(--text); border-color:var(--line)}
+.md-btn--ghost{background:transparent; color:var(--link)}
+.md-btn--ghost:hover{background:var(--accent-veil); color:var(--link)}
 
 /* ---------------------------------------------------------------------------
    Carimbo de origem — itens espelhados do Mastersys
@@ -607,7 +618,7 @@ input[type="checkbox"]{accent-color:var(--accent)}
 /* ---------------------------------------------------------------------------
    Filtros do quadro de tarefas
    --------------------------------------------------------------------------- */
-.md-taskfilters{ position:relative; padding:0 0 10px }
+.md-taskfilters{ position:relative; padding:4px 24px 10px }
 .md-taskfilters-bar{ display:flex; gap:8px; align-items:center; flex-wrap:wrap }
 
 .md-search{ position:relative; flex:1 1 260px; min-width:200px }
@@ -1243,3 +1254,116 @@ html.note-window-body, body.note-window-body{
 @media (prefers-reduced-motion: reduce){
   .md-update-bar-fill--indeterminate{ animation:none; width:100%; opacity:.5 }
 }
+
+/* ===========================================================================
+   Redesenho 2026-09-30 — casca (barra lateral), quadro Kanban e detalhe
+   =========================================================================== */
+.md-shell{height:100vh; display:flex; background:var(--canvas); overflow:hidden}
+.md-main{flex:1; min-width:0; display:flex; flex-direction:column; background:var(--canvas)}
+
+.md-sidebar{
+  width:232px; flex-shrink:0;
+  display:flex; flex-direction:column; gap:20px;
+  padding:18px 12px 14px;
+  background:var(--chrome); color:var(--chrome-text);
+  border-right:.5px solid var(--chrome-line);
+}
+.md-sidebar-brand{display:flex; align-items:center; gap:10px; padding:0 6px}
+.md-sidebar-icon{width:32px; height:32px; border-radius:8px; flex-shrink:0}
+.md-sidebar-brand-text{display:flex; flex-direction:column; min-width:0; line-height:1.25}
+.md-sidebar-brand-text span{font-weight:600; font-size:14px}
+.md-sidebar-brand-text small{font-size:11px; color:var(--chrome-text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.md-sidebar-group{display:flex; flex-direction:column; gap:2px}
+.md-sidebar-caption{padding:0 10px 4px; font-size:11px; font-weight:600; color:var(--chrome-text-dim)}
+.md-sidebar-item{
+  display:flex; align-items:center; width:100%; min-height:32px; padding:0 10px;
+  border:none; background:transparent; border-radius:8px;
+  color:var(--chrome-text); font-size:13px; text-align:left; cursor:pointer;
+}
+.md-sidebar-item:hover{background:var(--chrome-hover)}
+.md-sidebar-item[aria-current="page"]{background:var(--chrome-active); color:var(--chrome-active-text); font-weight:600}
+.md-sidebar-foot{margin-top:auto; display:flex; flex-direction:column; gap:8px}
+.md-sidebar-row{display:flex; align-items:center; justify-content:space-between; gap:8px; padding:0 10px; font-size:12px; color:var(--chrome-text-dim)}
+
+/* Quadro */
+.md-kanban{
+  flex:1; min-width:0;
+  display:grid; grid-template-columns:repeat(4, minmax(220px, 1fr)); gap:16px;
+  padding:16px 24px 20px; overflow:auto;
+}
+.md-kcol{display:flex; flex-direction:column; gap:10px; min-width:0; min-height:0}
+.md-kcol-head{display:flex; align-items:center; gap:8px; margin:0; padding:0 4px; font-size:13px; font-weight:600}
+.md-kcol-count{font-weight:400; color:var(--text-muted)}
+.md-kcol-dot{width:10px; height:10px; border-radius:50%; flex-shrink:0}
+.md-kcol-dot--todo{background:var(--col-todo)}
+.md-kcol-dot--doing{background:var(--col-doing)}
+.md-kcol-dot--waiting{background:var(--col-waiting)}
+.md-kcol-dot--done{background:var(--col-done)}
+.md-kcol-list{display:flex; flex-direction:column; gap:10px}
+.md-kcol-empty{padding:14px; border-radius:12px; border:1px dashed var(--line-strong); color:var(--text-faint); font-size:12px; text-align:center}
+
+.md-kcard{
+  display:flex; flex-direction:column; gap:8px; width:100%;
+  padding:12px; border:none; border-radius:12px;
+  background:var(--surface-plain); color:var(--text);
+  box-shadow:var(--shadow-sm);
+  text-align:left; font-size:13px; cursor:pointer;
+  transition:box-shadow .15s;
+}
+.md-kcard:hover{box-shadow:var(--shadow-md)}
+.md-kcard[aria-pressed="true"]{box-shadow:0 0 0 2px var(--accent), var(--shadow-md)}
+.md-kcard-top, .md-kcard-meta{display:flex; align-items:center; gap:6px; width:100%; min-width:0}
+.md-kcard-title{font-weight:600; font-size:14px; line-height:1.35; overflow-wrap:anywhere}
+.md-kcard-meta{font-size:12px; color:var(--text-muted)}
+.md-kcard-dot{width:8px; height:8px; border-radius:50%; flex-shrink:0}
+.md-kcard-client{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0}
+.md-kcard-due{font-size:11px; font-weight:600; white-space:nowrap}
+.md-kcard-due--late{color:var(--danger)}
+.md-kcard-due--soon{color:var(--warn)}
+.md-kcard-due--parked{color:var(--text-muted)}
+.md-kcard-due--plain{color:var(--text-muted)}
+
+.md-pill{
+  display:inline-flex; align-items:center; height:20px; padding:0 8px;
+  border-radius:10px; font-size:11px; font-weight:600; white-space:nowrap;
+  background:var(--fill); color:var(--text);
+  overflow:hidden; text-overflow:ellipsis; max-width:60%;
+}
+.md-pill--ticket{background:var(--accent-veil); color:var(--link)}
+.md-pill--quiet{color:var(--text-muted)}
+
+/* Painel de detalhe — flutua sobre o quadro (inspetor), para as quatro
+   colunas continuarem visíveis em 1280 px com ele aberto. */
+.md-main{position:relative}
+.md-detail{
+  position:absolute; right:0; top:0; bottom:0; z-index:20;
+  width:380px; max-width:100%;
+  box-shadow:var(--shadow-lg);
+  display:flex; flex-direction:column; gap:12px;
+  padding:16px 18px; overflow:auto;
+  background:var(--surface); border-left:.5px solid var(--line-strong);
+}
+.md-detail-head{display:flex; align-items:center; gap:8px}
+.md-detail-close{
+  width:26px; height:26px; border:none; border-radius:13px;
+  background:var(--fill); color:var(--text-muted); cursor:pointer; font-size:12px;
+}
+.md-detail-move{
+  display:grid; grid-template-columns:repeat(4, minmax(0, 1fr));
+  padding:2px; border-radius:9px; background:var(--fill);
+}
+.md-detail-move button{
+  min-height:28px; border:none; border-radius:7px; background:transparent;
+  font-size:12px; font-weight:500; color:var(--text); cursor:pointer;
+}
+.md-detail-move button[aria-pressed="true"]{background:var(--surface-plain); box-shadow:0 1px 3px rgba(0,0,0,.14); font-weight:600}
+/* O card completo, dentro do painel, sem moldura própria. */
+.md-detail .md-task{border:none; box-shadow:none; padding:0; background:transparent; margin:0; transform:none}
+
+/* Anotações no painel estreito: a régua de horário encolhe e o campo de
+   nova anotação ocupa a largura toda, como no layout de tela pequena. */
+.md-detail .md-tasklog-entry{grid-template-columns:38px 15px 1fr}
+.md-detail .md-tasklog-time{white-space:normal; line-height:1.35}
+.md-detail .md-tasklog-list::before{left:53px}
+.md-detail .md-tasklog-compose{padding-left:0; grid-template-columns:1fr}
+.md-detail .md-tasklog-compose .md-textarea{min-height:64px}

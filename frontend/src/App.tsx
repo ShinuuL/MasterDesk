@@ -4,8 +4,7 @@ import { TasksBoard } from "./components/TasksBoard";
 import { AuthPanel } from "./components/AuthPanel";
 import { NoteCard } from "./components/NoteCard";
 import { TaskWindowApp } from "./components/TaskWindowApp";
-import { ThemeToggle } from "./components/ThemeToggle";
-import { StartupToggle } from "./components/StartupToggle";
+import { Sidebar, type Section } from "./components/Sidebar";
 import { UpdateToast } from "./components/UpdateToast";
 import type { AuthPayload, Note } from "./types";
 import * as api from "./api";
@@ -26,7 +25,6 @@ import * as api from "./api";
  * arquivar não é concluir, e juntar as duas coisas misturaria "terminei isto"
  * com "saiu da mesa".
  */
-type Tab = "notes" | "tasks" | "tickets" | "done";
 
 /**
  * Espera antes de gravar a geometria de um pop-out, em ms.
@@ -348,7 +346,8 @@ function NoteWindowApp({ noteId }: { noteId: string }) {
 }
 
 function MainApp() {
-  const [tab, setTab] = useState<Tab>("notes");
+  // O Quadro abre primeiro: é a tela de trabalho. Notas é uma seção ao lado.
+  const [tab, setTab] = useState<Section>("board");
   const [authUser, setAuthUser] = useState<AuthPayload | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authNotice, setAuthNotice] = useState<string | null>(null);
@@ -390,7 +389,7 @@ function MainApp() {
       await api.authLogout();
       setAuthUser(null);
       setAuthNotice(null);
-      setTab("notes");
+      setTab("board");
     } catch (e) {
       // Não finge que saiu: com "manter conectado", um logout que falhou pode
       // deixar a sessão lembrada valendo, e o app reabriria logado.
@@ -430,110 +429,27 @@ function MainApp() {
   }
 
   return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background:"var(--surface)" }}>
-      <nav className="md-nav" role="tablist" aria-label="Seções do MasterNote">
-        <div className="md-brand" aria-label="MasterNote">
-          <div className="md-brand-mark" aria-hidden>MD</div>
-          <div style={{ display:"flex", flexDirection:"column", lineHeight:1 }}>
-            <span style={{ fontSize:14, letterSpacing:"-.02em" }}>MasterNote</span>
-            <small>notas • tarefas • foco</small>
-          </div>
-        </div>
+    <div className="md-shell">
+      <Sidebar section={tab} onSection={setTab} username={authUser.username} onLogout={handleLogout} />
 
-        <div className="md-tabs">
-          <button
-            role="tab"
-            aria-selected={tab === "notes"}
-            aria-controls="panel-notes"
-            id="tab-notes"
-            onClick={() => setTab("notes")}
-            className="md-tab"
-          >
-            Notas
-          </button>
-          <button
-            role="tab"
-            aria-selected={tab === "tasks"}
-            aria-controls="panel-tasks"
-            id="tab-tasks"
-            onClick={() => setTab("tasks")}
-            className="md-tab"
-          >
-            Tarefas
-          </button>
-          <button
-            role="tab"
-            aria-selected={tab === "tickets"}
-            aria-controls="panel-tickets"
-            id="tab-tickets"
-            onClick={() => setTab("tickets")}
-            className="md-tab"
-            title="Tarefas e chamados atribuídos a você no Mastersys"
-          >
-            Chamados
-          </button>
-          <button
-            role="tab"
-            aria-selected={tab === "done"}
-            aria-controls="panel-done"
-            id="tab-done"
-            onClick={() => setTab("done")}
-            className="md-tab"
-            title="Tarefas concluídas"
-          >
-            Concluídos
-          </button>
-        </div>
-
-        <div className="md-nav-right">
-          <StartupToggle />
-          <ThemeToggle />
-          <span className="md-nav-sep" aria-hidden>•</span>
-          <span className="md-nav-user">
-            <span className="md-nav-dot" aria-hidden />
-            @{authUser.username}
-          </span>
-          <button
-            onClick={handleLogout}
-            className="md-tab"
-            style={{ padding:"6px 12px", fontSize:12, minHeight:30 }}
-            title="Sair"
-          >
-            Sair
-          </button>
-        </div>
-      </nav>
-
-      {authNotice && (
-        <div role="status" className="md-alert">
-          {authNotice}
-          <button type="button" className="md-alert-dismiss" onClick={() => setAuthNotice(null)}>
-            Fechar
-          </button>
-        </div>
-      )}
-
-      <div style={{ flex:1, minHeight:0, display:"flex", flexDirection:"column" }}>
-        {tab === "notes" ? (
-          <div role="tabpanel" id="panel-notes" aria-labelledby="tab-notes" style={{ display:"flex", flexDirection:"column", flex:1, minHeight:0 }}>
-            <NotesBoard />
-          </div>
-        ) : tab === "tasks" ? (
-          <div role="tabpanel" id="panel-tasks" aria-labelledby="tab-tasks" style={{ display:"flex", flexDirection:"column", flex:1, minHeight:0 }}>
-            {/* Mesmo componente nas três abas, recortes diferentes — a prop
-                `view` documenta o que cada uma contém. */}
-            <TasksBoard view="local" />
-          </div>
-        ) : tab === "tickets" ? (
-          <div role="tabpanel" id="panel-tickets" aria-labelledby="tab-tickets" style={{ display:"flex", flexDirection:"column", flex:1, minHeight:0 }}>
-            <TasksBoard view="mastersys" />
-          </div>
-        ) : (
-          <div role="tabpanel" id="panel-done" aria-labelledby="tab-done" style={{ display:"flex", flexDirection:"column", flex:1, minHeight:0 }}>
-            <TasksBoard view="completed" />
+      <main className="md-main">
+        {authNotice && (
+          <div role="status" className="md-alert">
+            {authNotice}
+            <button type="button" className="md-alert-dismiss" onClick={() => setAuthNotice(null)}>
+              Fechar
+            </button>
           </div>
         )}
-      </div>
+
+        {/* `key` por seção: Quadro e Chamados são o mesmo componente com
+            recortes diferentes, e cada um guarda filtros e seleção próprios. */}
+        {tab === "notes" ? (
+          <NotesBoard />
+        ) : (
+          <TasksBoard key={tab} view={tab === "board" ? "board" : "mastersys"} />
+        )}
+      </main>
 
       <UpdateToast />
     </div>
