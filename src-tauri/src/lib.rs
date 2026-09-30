@@ -14,6 +14,15 @@ use masterdesk_infrastructure::{
 };
 use tauri::Manager;
 
+/// Mostra, restaura (se minimizada) e foca a janela principal.
+fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
@@ -205,40 +214,41 @@ pub fn run() {
                 }))
                 .menu(&menu)
                 .tooltip("MasterNote")
+                // Clique esquerdo reabre a janela (padrão do Windows para apps
+                // na bandeja); o menu fica no clique direito.
+                .show_menu_on_left_click(false)
+                .on_tray_icon_event(|tray, event| {
+                    if let tauri::tray::TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        show_main_window(tray.app_handle());
+                    }
+                })
                 .on_menu_event(move |app, event| match event.id().as_ref() {
-                    "show" => {
-                        if let Some(win) = app.get_webview_window("main") {
-                            let _ = win.show();
-                            let _ = win.set_focus();
-                        }
-                    }
-                    "quit" => {
-                        app.exit(0);
-                    }
+                    "show" => show_main_window(app),
+                    // A única saída de verdade: o X da janela só esconde.
+                    "quit" => app.exit(0),
                     _ => {}
                 })
                 .build(app)?;
 
-            // ---- Close-to-tray: interceptar fechamento da janela principal ----
-            // Havendo pop-out aberto (nota OU tarefa), esconde em vez de sair —
-            // os pop-outs continuam visíveis por cima de outros apps. Sem
-            // nenhum, o X fecha normalmente.
+            // ---- Close-to-tray: o X da janela principal SEMPRE esconde ----
+            // Pedido do DEV em 2026-09-30. Antes só escondia havendo pop-out
+            // aberto; sem nenhum, o X encerrava o app — e com ele a
+            // sincronização e os lembretes. Agora o app continua rodando na
+            // bandeja, e sair de verdade é pelo menu da bandeja ("Sair").
             //
-            // Incluir `task-` importa: sem isso, fechar a janela principal com
-            // uma tarefa destacada encerrava o app e matava a janela dela.
+            // `app.exit(0)` não passa por `CloseRequested` (emite
+            // `ExitRequested`), então o "Sair" não é interceptado aqui.
             if let Some(main_win) = app.get_webview_window("main") {
                 let main_handle = main_win.as_ref().clone();
-                let app_for_check = app.handle().clone();
                 main_win.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        let has_popouts = app_for_check
-                            .webview_windows()
-                            .keys()
-                            .any(|label| label.starts_with("note-") || label.starts_with("task-"));
-                        if has_popouts {
-                            api.prevent_close();
-                            let _ = main_handle.hide();
-                        }
+                        api.prevent_close();
+                        let _ = main_handle.hide();
                     }
                 });
             }
