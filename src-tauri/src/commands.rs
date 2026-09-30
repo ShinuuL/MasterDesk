@@ -157,6 +157,10 @@ pub struct UpdateTaskPayload {
     /// Vence `link` se ambos vierem.
     #[serde(default)]
     pub unlink: bool,
+    /// Coluna do quadro: `todo` | `doing` | `waiting`. Ausente = não mexe.
+    /// Só local — nada é escrito no Mastersys.
+    #[serde(default)]
+    pub board_column: Option<String>,
 }
 
 /// Vínculo manual como o frontend o envia. Convertido para `TicketLink` (que
@@ -897,8 +901,26 @@ pub async fn update_task(
         deadline,
         reminder_thresholds: parse_thresholds(payload.reminder_thresholds)?,
         link,
+        board_column: payload
+            .board_column
+            .as_deref()
+            .map(parse_board_column)
+            .transpose()?,
     };
     svc.update_task(uid, input).await.map_err(|e| e.to_string())
+}
+
+/// Estrito aqui, ao contrário de `BoardColumn::parse` (que tolera o banco):
+/// valor desconhecido vindo da UI é bug, e cair em silêncio em "A fazer"
+/// esconderia o bug movendo o card para o lugar errado.
+fn parse_board_column(s: &str) -> Result<masterdesk_domain::BoardColumn, String> {
+    use masterdesk_domain::BoardColumn;
+    match s {
+        "todo" => Ok(BoardColumn::Todo),
+        "doing" => Ok(BoardColumn::Doing),
+        "waiting" => Ok(BoardColumn::Waiting),
+        other => Err(format!("coluna do quadro inválida: {other}")),
+    }
 }
 
 #[tauri::command]

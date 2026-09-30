@@ -42,6 +42,7 @@ depois de criar o arquivo, considere imutável.
 | `0009_task_window_state.sql` | Geometria do pop-out de tarefa |
 | `0010_roles_and_ticket_link.sql` | Papéis analista/atendente + vínculo manual com chamado |
 | `0011_remembered_sessions.sql` | Sessão local lembrada ("manter conectado") |
+| `0012_task_board_column.sql` | Coluna do quadro Kanban (`tasks.board_column`, só local) |
 
 ## Nomes que não podem mudar
 
