@@ -5,6 +5,7 @@ import {
   countActiveFilters,
   defaultFilters,
   EMPTY_FILTERS,
+  groupStatusesByFlow,
   isOverdue,
   matchesFilters,
   matchesSearch,
@@ -451,5 +452,48 @@ describe("status fora do catálogo", () => {
 
   it("applyTaskFilters repassa o vocabulário", () => {
     expect(applyTaskFilters([taskMirror()], defaultFilters(CATALOG), "", KNOWN)).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Redesenho 2026-09-30: papel, escopo `tickets`, grupos por fluxo
+// ---------------------------------------------------------------------------
+
+describe("filtro por papel", () => {
+  const analyst = task({ external: ext({ role_analyst: true }) });
+  const attendant = task({ external: ext({ role_attendant: true }) });
+  it("analista mostra só onde sou analista", () => {
+    const f = { ...EMPTY_FILTERS, role: "analyst" as const };
+    expect(matchesFilters(analyst, f)).toBe(true);
+    expect(matchesFilters(attendant, f)).toBe(false);
+  });
+  it("atendente mostra só onde sou atendente", () => {
+    const f = { ...EMPTY_FILTERS, role: "attendant" as const };
+    expect(matchesFilters(attendant, f)).toBe(true);
+    expect(matchesFilters(analyst, f)).toBe(false);
+  });
+  it("conta como filtro ativo", () => {
+    expect(countActiveFilters({ ...EMPTY_FILTERS, role: "analyst" }, CATALOG, "tickets")).toBe(1);
+  });
+});
+
+describe("escopo tickets", () => {
+  it("não esconde pós-atendimento por padrão (vai para Concluído)", () => {
+    expect(defaultFilters(CATALOG, "tickets").statuses).toEqual([]);
+    expect(matchesFilters(posAtendimento(), defaultFilters(CATALOG, "tickets"))).toBe(true);
+  });
+});
+
+describe("groupStatusesByFlow", () => {
+  it("separa em andamento, aguardando e encerrados pelos campos do catálogo", () => {
+    const waiting = { ...st("aguardando_cliente", "Aguardando Cliente", true, false), pauses_sla: true };
+    const groups = groupStatusesByFlow([...CATALOG, waiting]);
+    const byId = Object.fromEntries(groups.map((g) => [g.id, g.statuses.map((s) => s.value)]));
+    expect(byId.active).toEqual(["novo", "em_atendimento"]);
+    expect(byId.waiting).toEqual(["aguardando_cliente"]);
+    expect(byId.finished).toEqual(["pos_atendimento", "finalizado", "cancelado"]);
+  });
+  it("omite grupo vazio", () => {
+    expect(groupStatusesByFlow(CATALOG).map((g) => g.id)).toEqual(["active", "finished"]);
   });
 });

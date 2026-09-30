@@ -31,6 +31,14 @@ export type TriState = "all" | "yes" | "no";
 
 export type OriginFilter = "all" | "local" | "mastersys";
 
+/**
+ * Papel do usuário no chamado. O Mastersys não envia o NOME do atendente de
+ * cada chamado — só se o usuário é analista (`assigned_to`) e/ou atendente
+ * (`created_by`) dele (ver migration 0010). Por isso o filtro é "meu papel",
+ * não "por pessoa".
+ */
+export type RoleFilter = "all" | "analyst" | "attendant";
+
 export interface TaskFilterState {
   /**
    * Slugs de status da origem que passam. Vazio = **todos**, inclusive parados.
@@ -49,6 +57,8 @@ export interface TaskFilterState {
   deadlineFrom: string;
   deadlineTo: string;
   origin: OriginFilter;
+  /** Meu papel no chamado. Ver [`RoleFilter`]. */
+  role: RoleFilter;
 }
 
 export const EMPTY_FILTERS: TaskFilterState = {
@@ -59,6 +69,7 @@ export const EMPTY_FILTERS: TaskFilterState = {
   deadlineFrom: "",
   deadlineTo: "",
   origin: "all",
+  role: "all",
 };
 
 /**
@@ -83,6 +94,10 @@ export function defaultFilters(
   // que nunca vieram do Mastersys. Em `done` a aba já É o recorte (concluídas
   // + parados na origem), e herdar o default do quadro ativo esconderia
   // pós-atendimento e finalizado, que é justamente o que ela mostra.
+  //
+  // `tickets` (Chamados no Kanban) mostra tudo: pós-atendimento, finalizado e
+  // cancelado agora vão para a coluna Concluído, e escondê-los por padrão
+  // deixaria essa coluna vazia.
   if (scope !== "mastersys") return { ...EMPTY_FILTERS };
   return {
     ...EMPTY_FILTERS,
@@ -98,7 +113,7 @@ export function defaultFilters(
  * locais, e uma chave só de `localStorage` faria a escolha de uma aba vazar
  * nas outras.
  */
-export type FilterScope = "local" | "mastersys" | "done";
+export type FilterScope = "local" | "mastersys" | "done" | "tickets";
 
 /** Quantos filtros estão ativos — alimenta o badge do botão "Filtros". */
 export function countActiveFilters(
@@ -116,6 +131,7 @@ export function countActiveFilters(
   if (filters.hasTicket !== "all") n += 1;
   if (filters.deadlineFrom !== "" || filters.deadlineTo !== "") n += 1;
   if (filters.origin !== "all") n += 1;
+  if (filters.role !== "all") n += 1;
   return n;
 }
 
@@ -234,6 +250,9 @@ export function matchesFilters(
   if (filters.origin === "local" && ext !== null) return false;
   if (filters.origin === "mastersys" && ext === null) return false;
 
+  if (filters.role === "analyst" && !ext?.role_analyst) return false;
+  if (filters.role === "attendant" && !ext?.role_attendant) return false;
+
   if (filters.statuses.length > 0) {
     // Tarefa local não tem status de origem. Ela sobrevive a um recorte de
     // status porque o filtro é sobre o vocabulário do Mastersys — esconder as
@@ -330,6 +349,9 @@ const STORAGE_KEYS: Record<FilterScope, string> = {
   mastersys: "masterdesk.task-filters",
   local: "masterdesk.task-filters.local",
   done: "masterdesk.task-filters.done",
+  // Chave nova de propósito: a preferência antiga de Chamados escondia
+  // pós-atendimento, e herdá-la esvaziaria a coluna Concluído.
+  tickets: "masterdesk.task-filters.tickets",
 };
 
 /**
@@ -372,4 +394,37 @@ export function saveFilters(
     // Ignorado de propósito: não gravar a preferência não pode impedir o
     // usuário de filtrar.
   }
+}
+
+// ---------------------------------------------------------------------------
+// Status agrupados por fluxo (para o painel de filtros)
+// ---------------------------------------------------------------------------
+
+export interface StatusGroup {
+  id: "active" | "waiting" | "finished";
+  title: string;
+  statuses: MastersysTicketStatus[];
+}
+
+/**
+ * Agrupa o catálogo pelo momento do fluxo, usando só campos que a origem
+ * envia — nenhuma lista fixa de slugs (o Mastersys aceita status novos):
+ *
+ * - **Encerrados**: `is_final` ou fora do filtro padrão (pós-atendimento,
+ *   finalizado, cancelado) — o mesmo critério que a sincronização usa para
+ *   mandar o item para "Concluído".
+ * - **Aguardando**: `pauses_sla` (espera de cliente/terceiro), se o admin ligou.
+ * - **Em andamento**: o resto.
+ *
+ * Dentro de cada grupo mantém `display_order`, a ordem que o suporte mostra.
+ */
+export function groupStatusesByFlow(catalog: readonly MastersysTicketStatus[]): StatusGroup[] {
+  const sorted = [...catalog].sort((a, b) => a.display_order - b.display_order);
+  const finished = (s: MastersysTicketStatus) => s.is_final || !s.default_filter;
+  const groups: StatusGroup[] = [
+    { id: "active", title: "Em andamento", statuses: sorted.filter((s) => !finished(s) && !s.pauses_sla) },
+    { id: "waiting", title: "Aguardando", statuses: sorted.filter((s) => !finished(s) && s.pauses_sla) },
+    { id: "finished", title: "Encerrados", statuses: sorted.filter(finished) },
+  ];
+  return groups.filter((g) => g.statuses.length > 0);
 }

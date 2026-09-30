@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { MastersysTicketStatus } from "../types";
 import {
   countActiveFilters,
   defaultFilters,
+  groupStatusesByFlow,
   type FilterScope,
+  type RoleFilter,
   type TaskFilterState,
   type TriState,
 } from "../tasks/filter";
@@ -24,6 +26,9 @@ interface Props {
   /** Qual aba filtra — decide o default contra o qual "ativo" é medido. */
   scope?: FilterScope;
 }
+
+/** Clientes mostrados antes de "mostrar todos" — a lista real passa de 100. */
+const CLIENTS_PREVIEW = 24;
 
 /** Mínimo do `GET /api/tickets/search` do Mastersys. */
 const REMOTE_SEARCH_MIN = 3;
@@ -48,6 +53,21 @@ export function TaskFilters({
   scope = "mastersys",
 }: Props) {
   const [open, setOpen] = useState(false);
+  const [clientQuery, setClientQuery] = useState("");
+  const [showAllClients, setShowAllClients] = useState(false);
+  const statusGroups = useMemo(() => groupStatusesByFlow(catalog), [catalog]);
+
+  // Selecionados primeiro, depois o que casa com a busca — com mais de 100
+  // clientes, achar o que já está marcado não pode exigir rolar a lista.
+  const clientList = useMemo(() => {
+    const q = clientQuery.trim().toLocaleLowerCase("pt-BR");
+    const matches = clients.filter((c) => !q || c.toLocaleLowerCase("pt-BR").includes(q));
+    const selected = matches.filter((c) => filters.clients.includes(c));
+    const rest = matches.filter((c) => !filters.clients.includes(c));
+    return [...selected, ...rest];
+  }, [clients, clientQuery, filters.clients]);
+  const visibleClients =
+    showAllClients || clientQuery.trim() ? clientList : clientList.slice(0, CLIENTS_PREVIEW);
   const popoverRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
@@ -85,6 +105,12 @@ export function TaskFilters({
     key: K,
     value: TaskFilterState[K],
   ) => onChange({ ...filters, [key]: value });
+
+  /** Marca ou desmarca todos os status de um grupo do fluxo de uma vez. */
+  const setGroup = (values: string[], on: boolean) => {
+    const others = filters.statuses.filter((v) => !values.includes(v));
+    set("statuses", on ? [...others, ...values] : others);
+  };
 
   const toggleInList = (key: "statuses" | "clients", value: string) => {
     const list = filters[key];
@@ -150,41 +176,86 @@ export function TaskFilters({
           {catalog.length > 0 && scope !== "local" && (
             <fieldset className="md-filter-group">
               <legend>Status</legend>
-              <div className="md-filter-chips">
-                {catalog.map((s) => {
-                  const on = filters.statuses.includes(s.value);
-                  return (
-                    <button
-                      key={s.value}
-                      className={`md-filter-chip ${on ? "md-filter-chip--on" : ""}`}
-                      onClick={() => toggleInList("statuses", s.value)}
-                      aria-pressed={on}
-                    >
-                      <StatusBadge
-                        statusLabel={s.value}
-                        catalog={catalog}
-                        parked={!s.default_filter}
-                      />
-                    </button>
-                  );
-                })}
-              </div>
+              {statusGroups.map((g) => {
+                const values = g.statuses.map((st) => st.value);
+                const allOn = values.every((v) => filters.statuses.includes(v));
+                return (
+                  <div key={g.id} className="md-filter-flow">
+                    <div className="md-filter-flow-head">
+                      <span>{g.title}</span>
+                      <button
+                        type="button"
+                        className="md-filter-link"
+                        onClick={() => setGroup(values, !allOn)}
+                      >
+                        {allOn ? "desmarcar" : "marcar todos"}
+                      </button>
+                    </div>
+                    <div className="md-filter-chips">
+                      {g.statuses.map((st) => {
+                        const on = filters.statuses.includes(st.value);
+                        return (
+                          <button
+                            key={st.value}
+                            type="button"
+                            className={`md-filter-chip md-filter-chip--status ${on ? "md-filter-chip--on" : ""}`}
+                            onClick={() => toggleInList("statuses", st.value)}
+                            aria-pressed={on}
+                            title={st.label}
+                          >
+                            <StatusBadge statusLabel={st.value} catalog={catalog} parked={g.id === "finished"} />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
               <p className="md-filter-hint">
-                Nada marcado mostra todos. Pós-atendimento, finalizado e
-                cancelado começam de fora, como no filtro do suporte.
+                Nada marcado mostra todos. Encerrados (pós-atendimento,
+                finalizado, cancelado) ficam na coluna Concluído.
               </p>
             </fieldset>
           )}
 
+          {scope !== "local" && (
+            <div className="md-filter-row">
+              <label className="md-filter-field">
+                <span>Meu papel no chamado</span>
+                <select
+                  className="md-input"
+                  value={filters.role}
+                  onChange={(e) => set("role", e.target.value as RoleFilter)}
+                >
+                  <option value="all">Todos</option>
+                  <option value="analyst">Sou o analista</option>
+                  <option value="attendant">Sou o atendente</option>
+                </select>
+              </label>
+            </div>
+          )}
+
           {clients.length > 0 && (
             <fieldset className="md-filter-group">
-              <legend>Cliente</legend>
+              <legend>
+                Cliente
+                {filters.clients.length > 0 && ` · ${filters.clients.length} marcado(s)`}
+              </legend>
+              <input
+                className="md-input md-filter-client-search"
+                type="search"
+                placeholder={`Buscar entre ${clients.length} clientes`}
+                aria-label="Buscar cliente"
+                value={clientQuery}
+                onChange={(e) => setClientQuery(e.target.value)}
+              />
               <div className="md-filter-chips">
-                {clients.map((c) => {
+                {visibleClients.map((c) => {
                   const on = filters.clients.includes(c);
                   return (
                     <button
                       key={c}
+                      type="button"
                       className={`md-filter-chip ${on ? "md-filter-chip--on" : ""}`}
                       onClick={() => toggleInList("clients", c)}
                       aria-pressed={on}
@@ -194,7 +265,13 @@ export function TaskFilters({
                     </button>
                   );
                 })}
+                {visibleClients.length === 0 && <span className="md-filter-hint">Nenhum cliente casa com a busca.</span>}
               </div>
+              {!clientQuery.trim() && clientList.length > CLIENTS_PREVIEW && (
+                <button type="button" className="md-filter-link" onClick={() => setShowAllClients((v) => !v)}>
+                  {showAllClients ? "mostrar menos" : `mostrar todos (${clientList.length})`}
+                </button>
+              )}
             </fieldset>
           )}
 

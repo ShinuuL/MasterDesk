@@ -66,6 +66,18 @@ impl MastersysTicketStatus {
     pub fn is_parked(&self) -> bool {
         self.is_final || self.pauses_sla || !self.default_filter
     }
+
+    /// O atendimento **acabou** na origem: finalizado, cancelado ou
+    /// pós-atendimento (decisão do DEV em 2026-09-30: pós-atendimento conta
+    /// como finalizado no MasterNote).
+    ///
+    /// Mais estreito que [`Self::is_parked`]: fica de fora `pauses_sla`, que
+    /// um admin pode ligar em status de espera ("aguardando cliente") — esses
+    /// estão parados, mas o trabalho não terminou. Usa os mesmos sinais
+    /// determinísticos descritos acima (`is_final`, `default_filter = 0`).
+    pub fn is_finished(&self) -> bool {
+        self.is_final || !self.default_filter
+    }
 }
 
 #[derive(Debug, sqlx::FromRow)]

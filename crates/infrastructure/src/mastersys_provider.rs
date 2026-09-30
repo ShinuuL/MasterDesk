@@ -664,22 +664,34 @@ fn urlencode(value: &str) -> String {
 /// Existe como tipo próprio para deixar explícito nos `to_work_item` que a
 /// ausência de um slug significa "não sei, assuma ativo" — e não "ativo".
 #[derive(Debug, Default)]
-pub struct ParkedStatuses(std::collections::HashSet<String>);
+pub struct ParkedStatuses {
+    parked: std::collections::HashSet<String>,
+    /// Subconjunto que conta como encerrado — ver `MastersysTicketStatus::is_finished`.
+    finished: std::collections::HashSet<String>,
+}
 
 impl ParkedStatuses {
     fn contains(&self, status: &str) -> bool {
-        self.0.contains(status)
+        self.parked.contains(status)
+    }
+
+    fn is_finished(&self, status: &str) -> bool {
+        self.finished.contains(status)
     }
 }
 
 impl FromIterator<MastersysTicketStatus> for ParkedStatuses {
     fn from_iter<I: IntoIterator<Item = MastersysTicketStatus>>(iter: I) -> Self {
-        Self(
-            iter.into_iter()
-                .filter(|s| s.is_parked())
-                .map(|s| s.value)
-                .collect(),
-        )
+        let mut out = Self::default();
+        for s in iter {
+            if s.is_finished() {
+                out.finished.insert(s.value.clone());
+            }
+            if s.is_parked() {
+                out.parked.insert(s.value);
+            }
+        }
+        out
     }
 }
 
@@ -890,7 +902,10 @@ impl MastersysTask {
             self.scheduled_at,
             Utc::now(),
         );
-        item.completed = self.status == "finished";
+        // Pós-atendimento (e todo status encerrado no catálogo) conta como
+        // concluído — decisão do DEV em 2026-09-30. Volta a pendente sozinho
+        // se o chamado for reaberto na origem.
+        item.completed = self.status == "finished" || parked.is_finished(self.effective_status());
         // `canceled` sai do MasterNote: é o mesmo tratamento que a integração
         // NoteDesk do Mastersys dá (vai para a lixeira).
         item.removed = self.status == "canceled";
@@ -982,7 +997,9 @@ impl MastersysTicket {
         // O Mastersys permite status customizados (`TicketStatus` aceita
         // qualquer string), então "concluído" é decidido pelos timestamps, que
         // são estáveis — não por uma lista de slugs que pode crescer.
-        item.completed = self.closed_at.is_some() || self.resolved_at.is_some();
+        item.completed = self.closed_at.is_some()
+            || self.resolved_at.is_some()
+            || parked.is_finished(&self.status);
         item.removed = self.status == "cancelado";
         Ok(item)
     }
@@ -1560,6 +1577,55 @@ mod tests {
             Some("pos_atendimento"),
             "o selo mostra o status do CHAMADO, que é o que tem cor no catálogo"
         );
+    }
+
+    fn catalog_status(
+        value: &str,
+        default_filter: bool,
+        pauses_sla: bool,
+    ) -> MastersysTicketStatus {
+        MastersysTicketStatus {
+            value: value.into(),
+            label: value.into(),
+            color: "#0ea5e9".into(),
+            default_filter,
+            is_final: false,
+            pauses_sla,
+            display_order: 1,
+        }
+    }
+
+    /// Decisão do DEV em 2026-09-30: pós-atendimento conta como finalizado.
+    /// Status que só pausa o SLA ("aguardando cliente") continua pendente —
+    /// está parado, mas o trabalho não terminou.
+    #[test]
+    fn pos_atendimento_counts_as_completed_but_waiting_does_not() {
+        let parked: ParkedStatuses = [
+            catalog_status("pos_atendimento", false, false),
+            catalog_status("aguardando_retorno_cliente", true, true),
+        ]
+        .into_iter()
+        .collect();
+
+        let task = |ticket_status: &str| {
+            let json = format!(
+                r#"{{"id":1,"title":"t","status":"in_progress","ticketId":9,"ticketStatus":"{ticket_status}"}}"#
+            );
+            serde_json::from_str::<MastersysTask>(&json)
+                .unwrap()
+                .to_work_item(&parked, TicketRoles::default())
+                .unwrap()
+        };
+
+        let pos = task("pos_atendimento");
+        assert!(pos.completed, "pós-atendimento vai para Concluído");
+
+        let waiting = task("aguardando_retorno_cliente");
+        assert!(waiting.reference.status_parked);
+        assert!(!waiting.completed, "aguardando não é concluído");
+
+        let active = task("em_andamento");
+        assert!(!active.completed);
     }
 
     #[test]

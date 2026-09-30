@@ -640,7 +640,7 @@ input[type="checkbox"]{accent-color:var(--accent)}
 
 .md-filter-popover{
   position:absolute; right:0; top:calc(100% - 4px); z-index:40;
-  width:min(420px, calc(100vw - 32px));
+  width:min(560px, calc(100vw - 32px));
   max-height:70vh; overflow-y:auto;
   padding:14px;
   background:var(--surface); border:1px solid var(--line);
@@ -1367,3 +1367,14 @@ html.note-window-body, body.note-window-body{
 .md-detail .md-tasklog-list::before{left:53px}
 .md-detail .md-tasklog-compose{padding-left:0; grid-template-columns:1fr}
 .md-detail .md-tasklog-compose .md-textarea{min-height:64px}
+
+/* Filtros: status agrupados por fluxo, busca de cliente */
+.md-filter-flow{display:flex; flex-direction:column; gap:6px; margin-bottom:10px}
+.md-filter-flow-head{display:flex; align-items:center; justify-content:space-between; font-size:12px; font-weight:600; color:var(--text-muted)}
+.md-filter-link{background:none; border:none; padding:0; color:var(--link); font-size:12px; cursor:pointer}
+.md-filter-link:hover{text-decoration:underline}
+/* Status mostra o nome inteiro: truncado, "Aguardando Atendi…" e "Aguardando
+   Atuali…" ficavam indistinguíveis. */
+.md-filter-chip--status{max-width:none; padding:2px; background:transparent; border-color:transparent}
+.md-filter-chip--status .md-status-badge{white-space:normal; text-align:left}
+.md-filter-client-search{width:100%; margin-bottom:8px}

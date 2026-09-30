@@ -103,7 +103,7 @@ export function TasksBoard({ view }: Props) {
   const [linkSeed, setLinkSeed] = useState<{ ticket: string; client: string | null } | null>(null);
 
   /** Preferências de filtro por seção — ver `FilterScope`. */
-  const scope: FilterScope = view === "board" ? "local" : "mastersys";
+  const scope: FilterScope = view === "board" ? "local" : "tickets";
 
   /** Card aberto no painel de detalhe. */
   const [selectedId, setSelectedId] = useState<string | null>(null);
