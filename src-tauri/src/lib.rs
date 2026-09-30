@@ -19,8 +19,23 @@ fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.show();
         let _ = win.unminimize();
+        wake_webview(&win);
         let _ = win.set_focus();
     }
+}
+
+/// Reativa o CONTEÚDO da janela (o WebView2), não só a moldura.
+///
+/// Bug reproduzido em 2026-09-30 (janela voltava toda branca): esconder a
+/// janela na bandeja e depois restaurá-la deixava o WebView2 suspenso —
+/// `document.visibilityState` continuava `hidden` com a janela visível. O
+/// `window.show()` do Tauri só mexe na janela nativa; quem liga o conteúdo é
+/// `ICoreWebView2Controller::SetIsVisible`, que o wry chama em
+/// `Webview::show()` (conferido em `wry-0.55.1/src/webview2/mod.rs`). Chamar
+/// com o conteúdo já ativo não tem efeito.
+fn wake_webview<R: tauri::Runtime>(win: &tauri::WebviewWindow<R>) {
+    let webview: &tauri::Webview<R> = win.as_ref();
+    let _ = webview.show();
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -244,12 +259,17 @@ pub fn run() {
             // `app.exit(0)` não passa por `CloseRequested` (emite
             // `ExitRequested`), então o "Sair" não é interceptado aqui.
             if let Some(main_win) = app.get_webview_window("main") {
-                let main_handle = main_win.as_ref().clone();
-                main_win.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let main_for_events = main_win.clone();
+                main_win.on_window_event(move |event| match event {
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
                         api.prevent_close();
-                        let _ = main_handle.hide();
+                        let _ = main_for_events.hide();
                     }
+                    // Qualquer caminho de volta (bandeja, barra de tarefas,
+                    // Alt+Tab) passa por ganhar foco: reativa o conteúdo aí
+                    // também, para não depender de por onde o usuário voltou.
+                    tauri::WindowEvent::Focused(true) => wake_webview(&main_for_events),
+                    _ => {}
                 });
             }
 
