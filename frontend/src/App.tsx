@@ -346,8 +346,8 @@ function NoteWindowApp({ noteId }: { noteId: string }) {
 }
 
 function MainApp() {
-  // O Quadro abre primeiro: é a tela de trabalho. Notas é uma seção ao lado.
-  const [tab, setTab] = useState<Section>("board");
+  // Notas abre primeiro (pedido do DEV em 2026-09-30).
+  const [tab, setTab] = useState<Section>("notes");
   const [authUser, setAuthUser] = useState<AuthPayload | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authNotice, setAuthNotice] = useState<string | null>(null);
@@ -389,7 +389,7 @@ function MainApp() {
       await api.authLogout();
       setAuthUser(null);
       setAuthNotice(null);
-      setTab("board");
+      setTab("notes");
     } catch (e) {
       // Não finge que saiu: com "manter conectado", um logout que falhou pode
       // deixar a sessão lembrada valendo, e o app reabriria logado.

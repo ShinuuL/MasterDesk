@@ -7,9 +7,9 @@ import appIcon from "../assets/app-icon.png";
 export type Section = "board" | "tickets" | "notes";
 
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
-  { id: "board", label: "Quadro", hint: "Tarefas locais e do Mastersys" },
-  { id: "tickets", label: "Chamados", hint: "Somente o que veio do Mastersys" },
   { id: "notes", label: "Notas", hint: "Post-its; destaque para ficar por cima" },
+  { id: "board", label: "Tarefas", hint: "Suas tarefas locais" },
+  { id: "tickets", label: "Chamados", hint: "Somente o que veio do Mastersys" },
 ];
 
 interface Props {

@@ -188,8 +188,9 @@ e a casca:
 - **Contraste:** prioridades viraram selos tingidos (texto na cor, fundo a 14%);
   os tons foram escolhidos para ≥ 4,5:1 nos dois temas — antes o texto branco
   sobre laranja/azul claro ficava entre 2,3 e 3,6:1.
-- **Casca:** barra lateral (Quadro / Chamados / Notas, tema, iniciar com o
-  Windows, sair) no lugar das abas do topo; quadro Kanban com painel de detalhe
+- **Casca:** barra lateral (Notas / Tarefas / Chamados, tema, iniciar com o
+  Windows, sair) no lugar das abas do topo. Notas abre primeiro; Tarefas mostra
+  só as locais e Chamados só os espelhos — sem interseção; quadro Kanban com painel de detalhe
   flutuante. A coluna do quadro é só local (`tasks.board_column`, migration 0012).
 - **Ícone:** a barra lateral e o login usam `frontend/src/assets/app-icon.png`,
   cópia em 128 px de `src-tauri/icons/icon.png`. Trocar o ícone exige

@@ -71,8 +71,11 @@ interface Props {
    *
    * | `view`      | seção    | conteúdo |
    * |-------------|----------|----------|
-   * | `board`     | Quadro   | tudo: tarefas locais e espelhos do Mastersys |
+   * | `board`     | Tarefas  | só tarefas locais (inclusive as vinculadas a um chamado) |
    * | `mastersys` | Chamados | só os espelhos do Mastersys |
+   *
+   * Sem interseção: cada item aparece numa seção só (pedido do DEV em
+   * 2026-09-30 — misturar tudo no Quadro o deixava igual a Chamados).
    *
    * As duas são o mesmo Kanban (A fazer / Em andamento / Aguardando /
    * Concluído). A coluna é só local — mover não altera o Mastersys.
@@ -99,12 +102,8 @@ export function TasksBoard({ view }: Props) {
    */
   const [linkSeed, setLinkSeed] = useState<{ ticket: string; client: string | null } | null>(null);
 
-  /**
-   * Preferências de filtro por seção — ver `FilterScope`. O Quadro usa o
-   * escopo de lista mista (`done`): oferece o filtro de Origem e não esconde
-   * parados por padrão, que agora têm coluna própria onde aparecer.
-   */
-  const scope: FilterScope = view === "board" ? "done" : "mastersys";
+  /** Preferências de filtro por seção — ver `FilterScope`. */
+  const scope: FilterScope = view === "board" ? "local" : "mastersys";
 
   /** Card aberto no painel de detalhe. */
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -719,7 +718,7 @@ export function TasksBoard({ view }: Props) {
 
   const allTasks = useMemo(() => [...pending, ...completed], [pending, completed]);
   const tasksOfView = useMemo(
-    () => (view === "board" ? allTasks : allTasks.filter((t) => t.external !== null)),
+    () => allTasks.filter((t) => (view === "board" ? t.external === null : t.external !== null)),
     [allTasks, view],
   );
   const visible = useMemo(
@@ -743,9 +742,9 @@ export function TasksBoard({ view }: Props) {
     <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
       <header className="md-board-header">
         <div className="md-board-heading">
-          <h1 className="md-board-title">{view === "board" ? "Quadro" : "Chamados"}</h1>
+          <h1 className="md-board-title">{view === "board" ? "Tarefas" : "Chamados"}</h1>
           <span className="md-count">
-            {view === "board" ? "Tarefas locais e do Mastersys" : "Somente o que veio do Mastersys"}
+            {view === "board" ? "Suas tarefas locais" : "Somente o que veio do Mastersys"}
             {hiddenByFilter > 0 && ` · ${hiddenByFilter} oculto(s) por filtro`}
           </span>
         </div>
@@ -856,11 +855,11 @@ export function TasksBoard({ view }: Props) {
           <div className="md-empty" role="status" style={{ flex: 1 }}>
             {view === "board" ? (
               <>
-                <h3>Nenhuma tarefa ainda</h3>
+                <h3>Nenhuma tarefa sua ainda</h3>
                 <p>
-                  Crie uma tarefa sua, ou conecte o Mastersys para trazer os
-                  chamados em que você é analista ou atendente. Mover cards
-                  entre colunas organiza o seu quadro — não altera o Mastersys.
+                  Tarefas que você cria, com prioridade, prazo e lembretes —
+                  inclusive as vinculadas a um chamado. Os chamados atribuídos a
+                  você ficam em <strong>Chamados</strong>.
                 </p>
                 <button
                   className="md-empty-cta md-empty-cta--primary"
