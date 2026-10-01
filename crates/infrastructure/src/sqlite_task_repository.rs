@@ -5,8 +5,8 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use masterdesk_domain::{
-    ports::TaskRepository, DomainError, DomainResult, ExternalKind, ExternalRef, ExternalSystem,
-    Priority, ReminderThreshold, Task, TaskId, TicketLink,
+    ports::TaskRepository, BoardColumn, DomainError, DomainResult, ExternalKind, ExternalRef,
+    ExternalSystem, Priority, ReminderThreshold, Task, TaskId, TicketLink,
 };
 use sqlx::SqlitePool;
 use uuid::Uuid;
@@ -51,6 +51,7 @@ struct TaskRow {
     link_ticket: Option<String>,
     link_client: Option<String>,
     link_status: Option<String>,
+    board_column: String,
     created_at: String,
     updated_at: String,
 }
@@ -122,7 +123,8 @@ fn row_to_task(row: TaskRow) -> DomainResult<Task> {
         updated_at,
     )?
     .attach_external(external)
-    .attach_link(link))
+    .attach_link(link)
+    .attach_board_column(BoardColumn::parse(&row.board_column)))
 }
 
 /// Reidrata o vínculo manual. `link_ticket` nulo = sem vínculo; cliente e
@@ -204,7 +206,7 @@ impl TaskRepository for SqliteTaskRepository {
                 external_status_parked,
                 external_role_analyst, external_role_attendant,
                 link_ticket, link_client, link_status,
-                created_at, updated_at
+                created_at, updated_at, board_column
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5,
                 ?6, ?7,
@@ -213,7 +215,7 @@ impl TaskRepository for SqliteTaskRepository {
                 ?14,
                 ?15, ?16,
                 ?17, ?18, ?19,
-                ?20, ?21
+                ?20, ?21, ?22
             )
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
@@ -234,6 +236,7 @@ impl TaskRepository for SqliteTaskRepository {
                 link_ticket = excluded.link_ticket,
                 link_client = excluded.link_client,
                 link_status = excluded.link_status,
+                board_column = excluded.board_column,
                 updated_at = excluded.updated_at
             "#,
         )
@@ -270,6 +273,7 @@ impl TaskRepository for SqliteTaskRepository {
         .bind(task.link.as_ref().and_then(|l| l.custom_status.clone()))
         .bind(created_str)
         .bind(now_str)
+        .bind(task.board_column.as_str())
         .execute(&self.pool)
         .await
         .map_err(map_sqlx_err)?;
@@ -374,6 +378,20 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         sqlx::migrate!("../../migrations").run(&pool).await.unwrap();
         SqliteTaskRepository::new(pool)
+    }
+
+    #[tokio::test]
+    async fn board_column_roundtrips_and_defaults_to_todo() {
+        let repo = fresh_repo().await;
+        let mut task = masterdesk_domain::Task::new("mover").unwrap();
+        repo.save(&task).await.unwrap();
+        let loaded = repo.find_by_id(task.id).await.unwrap().unwrap();
+        assert_eq!(loaded.board_column, BoardColumn::Todo);
+
+        task.set_board_column(BoardColumn::Waiting);
+        repo.save(&task).await.unwrap();
+        let loaded = repo.find_by_id(task.id).await.unwrap().unwrap();
+        assert_eq!(loaded.board_column, BoardColumn::Waiting);
     }
 
     #[tokio::test]

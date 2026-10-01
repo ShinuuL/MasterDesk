@@ -7,9 +7,9 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use masterdesk_application::{
-    AuthService, CreateNoteInput, CreateTaskInput, CreateUserInput, LoginInput,
+    AuthResult, AuthService, CreateNoteInput, CreateTaskInput, CreateUserInput, LoginInput,
     MastersysSyncService, SyncOptions, SyncReport, TaskNoteService, UpdateNoteInput,
-    UpdateTaskInput, UserView,
+    UpdateTaskInput,
 };
 use masterdesk_domain::{
     ExternalWorkItem, Note, Priority, ReminderThreshold, SupportIdentity, Task, TaskNote,
@@ -157,6 +157,10 @@ pub struct UpdateTaskPayload {
     /// Vence `link` se ambos vierem.
     #[serde(default)]
     pub unlink: bool,
+    /// Coluna do quadro: `todo` | `doing` | `waiting`. Ausente = não mexe.
+    /// Só local — nada é escrito no Mastersys.
+    #[serde(default)]
+    pub board_column: Option<String>,
 }
 
 /// Vínculo manual como o frontend o envia. Convertido para `TicketLink` (que
@@ -471,9 +475,11 @@ pub async fn open_note_window(
         return Ok(());
     }
 
+    // Só em dev, e sem o título: é conteúdo do usuário (CLAUDE §18).
+    #[cfg(debug_assertions)]
     println!(
-        "open_note_window: id={} title={} x={} y={} w={} h={}",
-        id, title, x, y, w, h
+        "open_note_window: id={} x={} y={} w={} h={}",
+        id, x, y, w, h
     );
 
     // P2 — URL UNIFICADA via WebviewUrl::App em dev E prod (removido o
@@ -484,6 +490,7 @@ pub async fn open_note_window(
     // initialization_script NÃO roda em WebviewUrl::External (wry/tauri).
     // App.tsx já lê search + hash + window.__NOTE_ID__ (fallback).
     let url = WebviewUrl::App(format!("/index.html#note={}", id).into());
+    #[cfg(debug_assertions)]
     println!("open_note_window url: {:?}", url);
 
     // Sanitiza o id para o initialization_script: serde_json::to_string produz
@@ -894,8 +901,26 @@ pub async fn update_task(
         deadline,
         reminder_thresholds: parse_thresholds(payload.reminder_thresholds)?,
         link,
+        board_column: payload
+            .board_column
+            .as_deref()
+            .map(parse_board_column)
+            .transpose()?,
     };
     svc.update_task(uid, input).await.map_err(|e| e.to_string())
+}
+
+/// Estrito aqui, ao contrário de `BoardColumn::parse` (que tolera o banco):
+/// valor desconhecido vindo da UI é bug, e cair em silêncio em "A fazer"
+/// esconderia o bug movendo o card para o lugar errado.
+fn parse_board_column(s: &str) -> Result<masterdesk_domain::BoardColumn, String> {
+    use masterdesk_domain::BoardColumn;
+    match s {
+        "todo" => Ok(BoardColumn::Todo),
+        "doing" => Ok(BoardColumn::Doing),
+        "waiting" => Ok(BoardColumn::Waiting),
+        other => Err(format!("coluna do quadro inválida: {other}")),
+    }
 }
 
 #[tauri::command]
@@ -937,29 +962,39 @@ pub struct AuthPayload {
     pub username: String,
     pub created_at: String,
     pub authenticated: bool,
+    /// Se a sessão ficou lembrada ("manter conectado"). Pedido e não
+    /// atendido = cofre do SO indisponível; a UI avisa.
+    pub remembered: bool,
 }
 
-impl From<UserView> for AuthPayload {
-    fn from(v: UserView) -> Self {
+impl From<AuthResult> for AuthPayload {
+    fn from(r: AuthResult) -> Self {
         Self {
-            id: v.id.to_string(),
-            username: v.username,
-            created_at: v.created_at.to_rfc3339(),
+            id: r.user.id.to_string(),
+            username: r.user.username,
+            created_at: r.user.created_at.to_rfc3339(),
             authenticated: true,
+            remembered: r.remembered,
         }
     }
 }
 
+/// `remember` tem default para um frontend antigo (pop-out aberto durante uma
+/// atualização) não quebrar por faltar o campo.
 #[derive(Debug, Deserialize)]
 pub struct RegisterPayload {
     pub username: String,
     pub password: String,
+    #[serde(default)]
+    pub remember: bool,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct LoginPayload {
     pub username: String,
     pub password: String,
+    #[serde(default)]
+    pub remember: bool,
 }
 
 #[tauri::command]
@@ -972,10 +1007,11 @@ pub async fn auth_register(
         .register(CreateUserInput {
             username: payload.username,
             password: payload.password,
+            remember: payload.remember,
         })
         .await
         .map_err(|e| e.to_string())?;
-    Ok(AuthPayload::from(res.user))
+    Ok(AuthPayload::from(res))
 }
 
 #[tauri::command]
@@ -988,10 +1024,22 @@ pub async fn auth_login(
         .login(LoginInput {
             username: payload.username,
             password: payload.password,
+            remember: payload.remember,
         })
         .await
         .map_err(|e| e.to_string())?;
-    Ok(AuthPayload::from(res.user))
+    Ok(AuthPayload::from(res))
+}
+
+/// Chamado na abertura do app: reabre a sessão de quem marcou "manter
+/// conectado". `None` leva à tela de login, como antes.
+#[tauri::command]
+pub async fn auth_restore_session(
+    state: State<'_, AppState>,
+) -> Result<Option<AuthPayload>, String> {
+    let svc = auth_service(&state);
+    let res = svc.restore_session().await.map_err(|e| e.to_string())?;
+    Ok(res.map(AuthPayload::from))
 }
 
 #[tauri::command]

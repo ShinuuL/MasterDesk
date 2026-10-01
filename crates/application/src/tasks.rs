@@ -6,7 +6,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use masterdesk_domain::{
     ports::{NotificationService, TaskRepository},
-    DomainError, DomainResult, Priority, ReminderThreshold, Task, TaskId, TicketLink,
+    BoardColumn, DomainError, DomainResult, Priority, ReminderThreshold, Task, TaskId, TicketLink,
 };
 
 #[derive(Debug, Clone)]
@@ -33,6 +33,8 @@ pub struct UpdateTaskInput {
     /// `None` = não mexe, `Some(None)` = desvincula, `Some(Some(l))` = grava.
     /// Mesmo protocolo de três estados já usado por `deadline`.
     pub link: Option<Option<TicketLink>>,
+    /// Coluna do quadro Kanban. `None` = não mexe. Só local.
+    pub board_column: Option<BoardColumn>,
 }
 
 pub struct TaskService {
@@ -102,6 +104,9 @@ impl TaskService {
         }
         if let Some(link) = input.link {
             task.set_ticket_link(link);
+        }
+        if let Some(column) = input.board_column {
+            task.set_board_column(column);
         }
 
         self.task_repo.save(&task).await?;
@@ -595,5 +600,33 @@ mod tests {
             cleared.title, "com vínculo",
             "desvincular não apaga a tarefa"
         );
+    }
+
+    #[tokio::test]
+    async fn update_moves_card_between_board_columns() {
+        let (_repo, _ns, svc) = setup();
+        let t = svc
+            .create_task(CreateTaskInput {
+                title: "card".into(),
+                description: None,
+                priority: None,
+                deadline: None,
+                reminder_thresholds: None,
+                link: None,
+            })
+            .await
+            .unwrap();
+        let moved = svc
+            .update_task(
+                t.id,
+                UpdateTaskInput {
+                    board_column: Some(BoardColumn::Doing),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(moved.board_column, BoardColumn::Doing);
+        assert_eq!(moved.title, "card", "mover não altera o resto");
     }
 }

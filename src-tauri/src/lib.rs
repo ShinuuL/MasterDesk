@@ -1,5 +1,6 @@
 //! Wiring do app Tauri — Fase 2 (Local Notes) + Fase 3 (Tasks/Notificações).
 
+pub mod autostart;
 pub mod commands;
 pub mod realtime_supervisor;
 pub mod sync_scheduler;
@@ -12,6 +13,30 @@ use masterdesk_infrastructure::{
     SqliteTaskRepository, SqliteTaskWindowRepository,
 };
 use tauri::Manager;
+
+/// Mostra, restaura (se minimizada) e foca a janela principal.
+fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        wake_webview(&win);
+        let _ = win.set_focus();
+    }
+}
+
+/// Reativa o CONTEÚDO da janela (o WebView2), não só a moldura.
+///
+/// Bug reproduzido em 2026-09-30 (janela voltava toda branca): esconder a
+/// janela na bandeja e depois restaurá-la deixava o WebView2 suspenso —
+/// `document.visibilityState` continuava `hidden` com a janela visível. O
+/// `window.show()` do Tauri só mexe na janela nativa; quem liga o conteúdo é
+/// `ICoreWebView2Controller::SetIsVisible`, que o wry chama em
+/// `Webview::show()` (conferido em `wry-0.55.1/src/webview2/mod.rs`). Chamar
+/// com o conteúdo já ativo não tem efeito.
+fn wake_webview<R: tauri::Runtime>(win: &tauri::WebviewWindow<R>) {
+    let webview: &tauri::Webview<R> = win.as_ref();
+    let _ = webview.show();
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -26,7 +51,13 @@ pub fn run() {
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     let builder = builder
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init());
+        .plugin(tauri_plugin_process::init())
+        // Sem argumentos extras: aberto pelo login do Windows, o app se
+        // comporta como aberto pelo atalho. `LaunchAgent` só vale no macOS.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ));
 
     builder
         .setup(|app| {
@@ -67,10 +98,27 @@ pub fn run() {
                 //
                 // `foreign_keys(true)`: SQLite desliga FK por conexão. Sem isso o
                 // ON DELETE CASCADE de `task_notes` (migration 0005) seria ignorado.
+                //
+                // WAL + `synchronous=NORMAL` (decisão do DEV em 2026-09-25):
+                // o sqlx 0.8 não liga WAL sozinho (fica no DELETE padrão do
+                // SQLite, com `synchronous=FULL`), e aí a sincronização em
+                // segundo plano e as escritas da UI disputam o lock do arquivo
+                // inteiro. Com WAL, leitura não bloqueia escrita. NORMAL é
+                // seguro contra queda do app; numa queda de energia pode
+                // perder a última transação, nunca corromper o banco.
+                //
+                // RISCO ACEITO: WAL não funciona em sistema de arquivos de
+                // rede. `%APPDATA%` é Roaming e, com redirecionamento de pasta
+                // corporativo, pode estar num compartilhamento. Se alguém
+                // relatar "database is locked" ou o app não abrir nessa
+                // configuração, é a primeira suspeita. O modo fica gravado no
+                // arquivo: voltar exige `journal_mode(Delete)` aqui.
                 let opts = SqliteConnectOptions::new()
                     .filename(&db_path)
                     .create_if_missing(true)
-                    .foreign_keys(true);
+                    .foreign_keys(true)
+                    .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+                    .synchronous(sqlx::sqlite::SqliteSynchronous::Normal);
                 let pool = sqlx::SqlitePool::connect_with(opts)
                     .await
                     .expect("failed to connect sqlite");
@@ -181,41 +229,47 @@ pub fn run() {
                 }))
                 .menu(&menu)
                 .tooltip("MasterNote")
+                // Clique esquerdo reabre a janela (padrão do Windows para apps
+                // na bandeja); o menu fica no clique direito.
+                .show_menu_on_left_click(false)
+                .on_tray_icon_event(|tray, event| {
+                    if let tauri::tray::TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        show_main_window(tray.app_handle());
+                    }
+                })
                 .on_menu_event(move |app, event| match event.id().as_ref() {
-                    "show" => {
-                        if let Some(win) = app.get_webview_window("main") {
-                            let _ = win.show();
-                            let _ = win.set_focus();
-                        }
-                    }
-                    "quit" => {
-                        app.exit(0);
-                    }
+                    "show" => show_main_window(app),
+                    // A única saída de verdade: o X da janela só esconde.
+                    "quit" => app.exit(0),
                     _ => {}
                 })
                 .build(app)?;
 
-            // ---- Close-to-tray: interceptar fechamento da janela principal ----
-            // Havendo pop-out aberto (nota OU tarefa), esconde em vez de sair —
-            // os pop-outs continuam visíveis por cima de outros apps. Sem
-            // nenhum, o X fecha normalmente.
+            // ---- Close-to-tray: o X da janela principal SEMPRE esconde ----
+            // Pedido do DEV em 2026-09-30. Antes só escondia havendo pop-out
+            // aberto; sem nenhum, o X encerrava o app — e com ele a
+            // sincronização e os lembretes. Agora o app continua rodando na
+            // bandeja, e sair de verdade é pelo menu da bandeja ("Sair").
             //
-            // Incluir `task-` importa: sem isso, fechar a janela principal com
-            // uma tarefa destacada encerrava o app e matava a janela dela.
+            // `app.exit(0)` não passa por `CloseRequested` (emite
+            // `ExitRequested`), então o "Sair" não é interceptado aqui.
             if let Some(main_win) = app.get_webview_window("main") {
-                let main_handle = main_win.as_ref().clone();
-                let app_for_check = app.handle().clone();
-                main_win.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        let has_popouts = app_for_check
-                            .webview_windows()
-                            .keys()
-                            .any(|label| label.starts_with("note-") || label.starts_with("task-"));
-                        if has_popouts {
-                            api.prevent_close();
-                            let _ = main_handle.hide();
-                        }
+                let main_for_events = main_win.clone();
+                main_win.on_window_event(move |event| match event {
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        let _ = main_for_events.hide();
                     }
+                    // Qualquer caminho de volta (bandeja, barra de tarefas,
+                    // Alt+Tab) passa por ganhar foco: reativa o conteúdo aí
+                    // também, para não depender de por onde o usuário voltou.
+                    tauri::WindowEvent::Focused(true) => wake_webview(&main_for_events),
+                    _ => {}
                 });
             }
 
@@ -261,6 +315,9 @@ pub fn run() {
             commands::auth_login,
             commands::auth_logout,
             commands::auth_is_authenticated,
+            commands::auth_restore_session,
+            autostart::autostart_is_enabled,
+            autostart::autostart_set_enabled,
             commands::add_task_note,
             commands::list_task_notes,
             commands::count_task_notes,

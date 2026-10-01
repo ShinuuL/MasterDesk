@@ -65,9 +65,14 @@ export interface Task {
    * permite acompanhar trabalho de um chamado sem escrever no Mastersys.
    */
   link: TicketLink | null;
+  /** Coluna do quadro Kanban. Só local — mover não altera o Mastersys. */
+  board_column: BoardColumn;
   created_at: string;
   updated_at: string;
 }
+
+/** Colunas persistidas. "Concluído" não está aqui: é `completed`. */
+export type BoardColumn = "todo" | "doing" | "waiting";
 
 /** Vínculo manual de uma tarefa local a um chamado (item 2 das features). */
 export interface TicketLink {
@@ -101,6 +106,8 @@ export interface UpdateTaskPayload {
   link?: TicketLinkPayload;
   /** Remove o vínculo. Flag explícita para não confundir com "ausente". */
   unlink?: boolean;
+  /** Move o card no quadro. Só local. */
+  board_column?: BoardColumn;
 }
 
 export interface TicketLinkPayload {
@@ -118,16 +125,21 @@ export interface AuthPayload {
   username: string;
   created_at: string;
   authenticated: boolean;
+  /** Sessão lembrada ("manter conectado"). `false` com `remember` pedido =
+   *  cofre do Windows indisponível. */
+  remembered: boolean;
 }
 
 export interface RegisterPayload {
   username: string;
   password: string;
+  remember: boolean;
 }
 
 export interface LoginPayload {
   username: string;
   password: string;
+  remember: boolean;
 }
 
 // ---------------------------------------------------------------------------

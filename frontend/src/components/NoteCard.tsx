@@ -1,9 +1,15 @@
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import type { Note } from "../types";
 import { noteSurface, noteSwatch, parseHex } from "../theme/noteSurface";
 import { useTheme } from "../theme/useTheme";
 
 const COLORS = ["#FFEB3B", "#FF9800", "#8BC34A", "#03A9F4", "#E91E63", "#9C27B0", "#FFFFFF", "#263238"] as const;
+/** Mesmo valor do debounce de geometria do pop-out (`App.tsx`): o seletor de
+ *  cor e o slider disparam um evento por passo, e cada um virava um UPDATE. */
+const APPEARANCE_DEBOUNCE_MS = 250;
+
+type Appearance = { color?: string; opacity?: number };
+
 const COLOR_LABEL: Record<string,string> = {
   "#FFEB3B":"Amarelo", "#FF9800":"Laranja", "#8BC34A":"Verde", "#03A9F4":"Azul",
   "#E91E63":"Rosa", "#9C27B0":"Roxo", "#FFFFFF":"Branco", "#263238":"Grafite"
@@ -20,14 +26,60 @@ interface Props {
   onCloseWindow?: (id: string) => void;
   /** True when rendering in an isolated note-window (via ?note= URL) */
   noteWindowMode?: boolean;
+  /** Zoom do quadro: o arrasto converte pixels de tela em coordenadas do mundo. */
+  zoom?: number;
 }
 
-export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onToggleAot, onPopOut, onCloseWindow, noteWindowMode }: Props) {
+export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onToggleAot, onPopOut, onCloseWindow, noteWindowMode, zoom = 1 }: Props) {
   const { theme } = useTheme();
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(note.title);
   const [content, setContent] = useState(note.content);
   const dragRef = useRef<{ x: number; y: number; orig: [number, number] } | null>(null);
+
+  // Cor/opacidade em arrasto: a tela acompanha na hora (`draft`), o banco só
+  // recebe o valor quando o arrasto para. Gravar a cada passo gerava dezenas
+  // de IPC + UPDATE, e respostas fora de ordem podiam deixar um valor
+  // intermediário como final.
+  const [draft, setDraft] = useState<Appearance>({});
+  const pendingRef = useRef<Appearance>({});
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onUpdateRef = useRef(onUpdate);
+  onUpdateRef.current = onUpdate;
+  const noteIdRef = useRef(note.id);
+  noteIdRef.current = note.id;
+
+  const flushAppearance = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    const patch = pendingRef.current;
+    if (patch.color === undefined && patch.opacity === undefined) return;
+    pendingRef.current = {};
+    onUpdateRef.current(noteIdRef.current, patch);
+  };
+
+  const previewAppearance = (patch: Appearance) => {
+    pendingRef.current = { ...pendingRef.current, ...patch };
+    setDraft((d) => ({ ...d, ...patch }));
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(flushAppearance, APPEARANCE_DEBOUNCE_MS);
+  };
+
+  // Fechar o card (ou a janela) no meio do arrasto não perde o último valor.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => () => flushAppearance(), []);
+
+  // Chegou o valor salvo e não há nada pendente: o rascunho sai de cena.
+  useEffect(() => {
+    if (pendingRef.current.color === undefined && pendingRef.current.opacity === undefined) {
+      setDraft({});
+    }
+  }, [note.color, note.opacity]);
+
+  const color = draft.color ?? note.color;
+  const opacity = draft.opacity ?? note.opacity;
 
   const save = () => {
     setEditing(false);
@@ -55,14 +107,18 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
   const handleMouseDown = (e: React.MouseEvent) => {
     // In note-window mode, don't prevent default — let the OS handle window dragging
     if (noteWindowMode) return;
+    // Não deixa o quadro iniciar um pan nem selecionar texto durante o arrasto.
+    e.stopPropagation();
+    if ((e.target as HTMLElement).closest("button")) return;
+    e.preventDefault();
 
     const startX = e.clientX;
     const startY = e.clientY;
     dragRef.current = { x: startX, y: startY, orig: [...note.position] as [number, number] };
     const onMove = (ev: MouseEvent) => {
       if (!dragRef.current) return;
-      const dx = ev.clientX - dragRef.current.x;
-      const dy = ev.clientY - dragRef.current.y;
+      const dx = (ev.clientX - dragRef.current.x) / zoom;
+      const dy = (ev.clientY - dragRef.current.y) / zoom;
       const nx = dragRef.current.orig[0] + dx;
       const ny = dragRef.current.orig[1] + dy;
       const el = document.getElementById(`note-${note.id}`);
@@ -73,8 +129,8 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
     };
     const onUp = (ev: MouseEvent) => {
       if (!dragRef.current) return;
-      const dx = ev.clientX - dragRef.current.x;
-      const dy = ev.clientY - dragRef.current.y;
+      const dx = (ev.clientX - dragRef.current.x) / zoom;
+      const dy = (ev.clientY - dragRef.current.y) / zoom;
       const nx = dragRef.current.orig[0] + dx;
       const ny = dragRef.current.orig[1] + dy;
       document.removeEventListener("mousemove", onMove);
@@ -93,7 +149,7 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
   // A cor da nota é do usuário, então não pode virar token de CSS: o tema
   // escuro a remapeia para uma variante profunda da mesma família, e o texto
   // sai do contraste calculado (WCAG), não de uma lista de cores conhecidas.
-  const surface = noteSurface(note.color, theme === "dark");
+  const surface = noteSurface(color, theme === "dark");
   const ink = surface.text;
   const headBtnStyle: React.CSSProperties = {
     color: ink,
@@ -114,7 +170,7 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
         borderRadius: 0,
         border: "none",
         background: surface.background,
-        opacity: note.opacity,
+        opacity,
         color: ink,
         resize: "none",
       } : {
@@ -124,14 +180,17 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
         height: note.size[1],
         background: surface.background,
         borderColor: surface.border,
-        opacity: note.opacity,
+        opacity,
         color: ink,
       }}
       onMouseUp={(e) => {
         if (noteWindowMode) return;
-        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-        if (Math.abs(rect.width - note.size[0]) > 2 || Math.abs(rect.height - note.size[1]) > 2) {
-          handleResizeEnd(Math.round(rect.width), Math.round(rect.height));
+        // offsetWidth/Height ignoram o `scale` do quadro (o bounding rect não).
+        const el = e.currentTarget as HTMLDivElement;
+        const w = el.offsetWidth;
+        const h = el.offsetHeight;
+        if (Math.abs(w - note.size[0]) > 2 || Math.abs(h - note.size[1]) > 2) {
+          handleResizeEnd(Math.round(w), Math.round(h));
         }
       }}
       role="article"
@@ -226,11 +285,16 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
 
         <div className="md-swatches" role="group" aria-label="Escolher cor">
           {COLORS.map((c) => {
-            const selected = c === note.color;
+            const selected = c === color;
             return (
               <button
                 key={c}
-                onClick={() => onUpdate(note.id, { color: c })}
+                onClick={() => {
+                  // Pelo mesmo caminho do arrasto, para um flush atrasado de
+                  // cor personalizada não sobrescrever este clique. Grava já.
+                  previewAppearance({ color: c });
+                  flushAppearance();
+                }}
                 title={COLOR_LABEL[c] ?? c}
                 aria-label={`Cor ${COLOR_LABEL[c] ?? c}`}
                 aria-pressed={selected}
@@ -247,7 +311,7 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
           <label
             title="Cor personalizada"
             aria-label="Cor personalizada"
-            aria-pressed={!COLORS.includes(note.color as typeof COLORS[number])}
+            aria-pressed={!COLORS.includes(color as typeof COLORS[number])}
             className="md-swatch"
             style={{
               background:"conic-gradient(from 0deg, #f44336, #ffeb3b, #8bc34a, #03a9f4, #9c27b0, #f44336)",
@@ -258,8 +322,8 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
             <span aria-hidden style={{ fontSize:10, lineHeight:1, fontWeight:800, background:"#fff", color:"#0F1115", borderRadius:"50%", width:10, height:10, display:"grid", placeItems:"center" }}>+</span>
             <input
               type="color"
-              value={parseHex(note.color) ? note.color : "#FFEB3B"}
-              onInput={(e) => onUpdate(note.id, { color: (e.target as HTMLInputElement).value })}
+              value={parseHex(color) ? color : "#FFEB3B"}
+              onInput={(e) => previewAppearance({ color: (e.target as HTMLInputElement).value })}
               style={{ position:"absolute", inset:0, opacity:0, cursor:"pointer", width:"100%", height:"100%" }}
             />
           </label>
@@ -267,8 +331,8 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
 
         <label style={{ fontSize:11, fontWeight:600, letterSpacing:".04em", textTransform:"uppercase", opacity:.75, display:"flex", alignItems:"center", gap:7, flexWrap:"wrap" }}>
           Opacidade
-          <input type="range" min={0.1} max={1} step={0.05} value={note.opacity} onChange={(e) => onUpdate(note.id, { opacity: parseFloat(e.target.value) })} aria-label="Opacidade" style={{ flex:1 }} />
-          <span style={{ fontVariantNumeric:"tabular-nums", fontSize:12, opacity:1, textTransform:"none", letterSpacing:0 }}>{Math.round(note.opacity * 100)}%</span>
+          <input type="range" min={0.1} max={1} step={0.05} value={opacity} onChange={(e) => previewAppearance({ opacity: parseFloat(e.target.value) })} aria-label="Opacidade" style={{ flex:1 }} />
+          <span style={{ fontVariantNumeric:"tabular-nums", fontSize:12, opacity:1, textTransform:"none", letterSpacing:0 }}>{Math.round(opacity * 100)}%</span>
         </label>
 
         <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>

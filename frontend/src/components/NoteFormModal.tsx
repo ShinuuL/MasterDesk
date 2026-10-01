@@ -20,6 +20,8 @@ interface Props {
   onClose: () => void;
   /** Recebe a nota criada, para o quadro inseri-la sem recarregar tudo. */
   onCreated: (note: Note) => void;
+  /** Onde a nota nasce no quadro (espaço livre calculado pelo `NotesBoard`). */
+  position?: [number, number];
 }
 
 /**
@@ -36,7 +38,7 @@ interface Props {
  * não: dentro de um `textarea` ele é quebra de linha, e roubar isso seria pior
  * que perder o atalho.
  */
-export function NoteFormModal({ onClose, onCreated }: Props) {
+export function NoteFormModal({ onClose, onCreated, position }: Props) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [color, setColor] = useState<string>(COLORS[0]);
@@ -50,7 +52,7 @@ export function NoteFormModal({ onClose, onCreated }: Props) {
     setSaving(true);
     setError(null);
     try {
-      const created = await api.createNote({ title: title.trim(), content, color });
+      const created = await api.createNote({ title: title.trim(), content, color, position });
       onCreated(created);
       onClose();
     } catch (e) {

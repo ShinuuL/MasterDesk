@@ -4,7 +4,7 @@ import { TasksBoard } from "./components/TasksBoard";
 import { AuthPanel } from "./components/AuthPanel";
 import { NoteCard } from "./components/NoteCard";
 import { TaskWindowApp } from "./components/TaskWindowApp";
-import { ThemeToggle } from "./components/ThemeToggle";
+import { Sidebar, type Section } from "./components/Sidebar";
 import { UpdateToast } from "./components/UpdateToast";
 import type { AuthPayload, Note } from "./types";
 import * as api from "./api";
@@ -25,7 +25,6 @@ import * as api from "./api";
  * arquivar não é concluir, e juntar as duas coisas misturaria "terminei isto"
  * com "saiu da mesa".
  */
-type Tab = "notes" | "tasks" | "tickets" | "done";
 
 /**
  * Espera antes de gravar a geometria de um pop-out, em ms.
@@ -147,7 +146,6 @@ function NoteWindowApp({ noteId }: { noteId: string }) {
       try {
         console.log("NoteWindow: fetching", noteId);
         const n = await api.getNote(noteId);
-        console.log("NoteWindow: got", n);
         if (!cancelled) setNote(n);
       } catch (e) {
         console.error("getNote falhou:", e);
@@ -348,32 +346,30 @@ function NoteWindowApp({ noteId }: { noteId: string }) {
 }
 
 function MainApp() {
-  const [tab, setTab] = useState<Tab>("notes");
+  // Notas abre primeiro (pedido do DEV em 2026-09-30).
+  const [tab, setTab] = useState<Section>("notes");
   const [authUser, setAuthUser] = useState<AuthPayload | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    // Rede de segurança: se o backend não responder, cai no login em vez de
+    // ficar no esqueleto para sempre. A restauração verifica um hash Argon2
+    // (dezenas de ms), então 3 s é folga larga.
     const timeout = setTimeout(() => {
       if (!cancelled) {
-        console.warn("authIsAuthenticated timeout — fallback para AuthPanel");
+        console.warn("authRestoreSession timeout — fallback para AuthPanel");
         setAuthLoading(false);
       }
     }, 3000);
     (async () => {
       try {
-        const authed = await api.authIsAuthenticated();
-        if (!cancelled) {
-          if (!authed) setAuthUser(null);
-          else {
-            // Sessão válida mas sem detalhe de usuário — tenta restaurar via login é necessário?
-            // Mostra AuthPanel para login; se houver sessão, o backend já permite operações.
-            // Para evitar tela vazia, mantém null até login mas sai do loading.
-            setAuthUser(null);
-          }
-        }
+        // "Manter conectado": reabre a sessão lembrada, se houver.
+        const restored = await api.authRestoreSession();
+        if (!cancelled) setAuthUser(restored);
       } catch (e) {
-        console.error("authIsAuthenticated falhou:", e);
+        console.error("authRestoreSession falhou:", e);
         if (!cancelled) setAuthUser(null);
       } finally {
         if (!cancelled) {
@@ -392,10 +388,12 @@ function MainApp() {
     try {
       await api.authLogout();
       setAuthUser(null);
+      setAuthNotice(null);
       setTab("notes");
-    } catch {
-      // falha de logout não bloqueia UI
-      setAuthUser(null);
+    } catch (e) {
+      // Não finge que saiu: com "manter conectado", um logout que falhou pode
+      // deixar a sessão lembrada valendo, e o app reabriria logado.
+      setAuthNotice(`Não foi possível sair completamente: ${String(e)}. Tente de novo.`);
     }
   };
 
@@ -415,107 +413,43 @@ function MainApp() {
   if (!authUser) {
     return (
       <>
-        <AuthPanel onAuthenticated={(u) => setAuthUser(u)} />
+        <AuthPanel
+          onAuthenticated={(u, rememberFailed) => {
+            setAuthUser(u);
+            setAuthNotice(
+              rememberFailed
+                ? "Não foi possível guardar a sessão no Gerenciador de Credenciais — você precisará entrar de novo na próxima abertura."
+                : null,
+            );
+          }}
+        />
         <UpdateToast />
       </>
     );
   }
 
   return (
-    <div style={{ height: "100vh", display: "flex", flexDirection: "column", background:"var(--surface)" }}>
-      <nav className="md-nav" role="tablist" aria-label="Seções do MasterNote">
-        <div className="md-brand" aria-label="MasterNote">
-          <div className="md-brand-mark" aria-hidden>MD</div>
-          <div style={{ display:"flex", flexDirection:"column", lineHeight:1 }}>
-            <span style={{ fontSize:14, letterSpacing:"-.02em" }}>MasterNote</span>
-            <small>notas • tarefas • foco</small>
-          </div>
-        </div>
+    <div className="md-shell">
+      <Sidebar section={tab} onSection={setTab} username={authUser.username} onLogout={handleLogout} />
 
-        <div className="md-tabs">
-          <button
-            role="tab"
-            aria-selected={tab === "notes"}
-            aria-controls="panel-notes"
-            id="tab-notes"
-            onClick={() => setTab("notes")}
-            className="md-tab"
-          >
-            Notas
-          </button>
-          <button
-            role="tab"
-            aria-selected={tab === "tasks"}
-            aria-controls="panel-tasks"
-            id="tab-tasks"
-            onClick={() => setTab("tasks")}
-            className="md-tab"
-          >
-            Tarefas
-          </button>
-          <button
-            role="tab"
-            aria-selected={tab === "tickets"}
-            aria-controls="panel-tickets"
-            id="tab-tickets"
-            onClick={() => setTab("tickets")}
-            className="md-tab"
-            title="Tarefas e chamados atribuídos a você no Mastersys"
-          >
-            Chamados
-          </button>
-          <button
-            role="tab"
-            aria-selected={tab === "done"}
-            aria-controls="panel-done"
-            id="tab-done"
-            onClick={() => setTab("done")}
-            className="md-tab"
-            title="Tarefas concluídas"
-          >
-            Concluídos
-          </button>
-        </div>
-
-        <div className="md-nav-right">
-          <ThemeToggle />
-          <span className="md-nav-sep" aria-hidden>•</span>
-          <span className="md-nav-user">
-            <span className="md-nav-dot" aria-hidden />
-            @{authUser.username}
-          </span>
-          <button
-            onClick={handleLogout}
-            className="md-tab"
-            style={{ padding:"6px 12px", fontSize:12, minHeight:30 }}
-            title="Sair"
-          >
-            Sair
-          </button>
-        </div>
-      </nav>
-
-      <div style={{ flex:1, minHeight:0, display:"flex", flexDirection:"column" }}>
-        {tab === "notes" ? (
-          <div role="tabpanel" id="panel-notes" aria-labelledby="tab-notes" style={{ display:"flex", flexDirection:"column", flex:1, minHeight:0 }}>
-            <NotesBoard />
-          </div>
-        ) : tab === "tasks" ? (
-          <div role="tabpanel" id="panel-tasks" aria-labelledby="tab-tasks" style={{ display:"flex", flexDirection:"column", flex:1, minHeight:0 }}>
-            {/* Mesmo componente nas três abas, recortes diferentes — a prop
-                `view` documenta o que cada uma contém. */}
-            <TasksBoard view="local" />
-          </div>
-        ) : tab === "tickets" ? (
-          <div role="tabpanel" id="panel-tickets" aria-labelledby="tab-tickets" style={{ display:"flex", flexDirection:"column", flex:1, minHeight:0 }}>
-            <TasksBoard view="mastersys" />
-          </div>
-        ) : (
-          <div role="tabpanel" id="panel-done" aria-labelledby="tab-done" style={{ display:"flex", flexDirection:"column", flex:1, minHeight:0 }}>
-            <TasksBoard view="completed" />
+      <main className="md-main">
+        {authNotice && (
+          <div role="status" className="md-alert">
+            {authNotice}
+            <button type="button" className="md-alert-dismiss" onClick={() => setAuthNotice(null)}>
+              Fechar
+            </button>
           </div>
         )}
-      </div>
+
+        {/* `key` por seção: Quadro e Chamados são o mesmo componente com
+            recortes diferentes, e cada um guarda filtros e seleção próprios. */}
+        {tab === "notes" ? (
+          <NotesBoard />
+        ) : (
+          <TasksBoard key={tab} view={tab === "board" ? "board" : "mastersys"} />
+        )}
+      </main>
 
       <UpdateToast />
     </div>

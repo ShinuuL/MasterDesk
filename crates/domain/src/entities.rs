@@ -503,6 +503,33 @@ mod tests {
     }
 
     #[test]
+    fn apply_external_update_preserves_board_column() {
+        // A coluna do quadro é só local: a sincronização não pode devolver o
+        // card para "A fazer" a cada ciclo.
+        let mut t = Task::new("t").unwrap();
+        t.set_board_column(BoardColumn::Doing);
+        t.apply_external_update(&mastersys_item("1", "vindo do mastersys"))
+            .unwrap();
+        assert_eq!(t.board_column, BoardColumn::Doing);
+    }
+
+    #[test]
+    fn board_column_parse_tolerates_unknown_values() {
+        assert_eq!(BoardColumn::parse("doing"), BoardColumn::Doing);
+        assert_eq!(BoardColumn::parse("waiting"), BoardColumn::Waiting);
+        assert_eq!(BoardColumn::parse("todo"), BoardColumn::Todo);
+        assert_eq!(BoardColumn::parse("coluna-do-futuro"), BoardColumn::Todo);
+        for c in [BoardColumn::Todo, BoardColumn::Doing, BoardColumn::Waiting] {
+            assert_eq!(BoardColumn::parse(c.as_str()), c);
+        }
+    }
+
+    #[test]
+    fn new_task_starts_in_todo() {
+        assert_eq!(Task::new("x").unwrap().board_column, BoardColumn::Todo);
+    }
+
+    #[test]
     fn apply_external_update_rejects_invalid_payload() {
         let mut t = Task::new("original").unwrap();
         let mut item = mastersys_item("1", "ok");
@@ -714,6 +741,41 @@ mod tests {
     }
 }
 
+/// Coluna do quadro Kanban em que o usuário pôs a tarefa.
+///
+/// **Estritamente local** (decisão do DEV em 2026-09-30): mover um card não
+/// escreve nada no Mastersys, e a sincronização nunca altera este campo —
+/// `apply_external_update` não o toca. "Concluído" não é uma variante: é
+/// `Task::completed`, que já existe e tem regras próprias (lembretes etc.).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BoardColumn {
+    #[default]
+    Todo,
+    Doing,
+    Waiting,
+}
+
+impl BoardColumn {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            BoardColumn::Todo => "todo",
+            BoardColumn::Doing => "doing",
+            BoardColumn::Waiting => "waiting",
+        }
+    }
+
+    /// Valor desconhecido cai em `Todo`: é o estado neutro, e um banco escrito
+    /// por uma versão futura não pode impedir a leitura da tarefa.
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "doing" => BoardColumn::Doing,
+            "waiting" => BoardColumn::Waiting,
+            _ => BoardColumn::Todo,
+        }
+    }
+}
+
 /// Task local — também independente de Mastersys (seção 5 do CLAUDE.md).
 /// A ligação com um ticket Mastersys, quando existir, será um campo opcional
 /// de metadado de integração, adicionado apenas na Fase 5 (ADR-006).
@@ -747,6 +809,9 @@ pub struct Task {
     /// chamado sem escrever nada no Mastersys.
     #[serde(default)]
     pub link: Option<TicketLink>,
+    /// Coluna do quadro. Ver [`BoardColumn`].
+    #[serde(default)]
+    pub board_column: BoardColumn,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -894,6 +959,7 @@ impl Task {
             completed: false,
             external: None,
             link: None,
+            board_column: BoardColumn::Todo,
             created_at: now,
             updated_at: now,
         })
@@ -926,6 +992,7 @@ impl Task {
             completed,
             external: None,
             link: None,
+            board_column: BoardColumn::Todo,
             created_at,
             updated_at,
         })
@@ -946,6 +1013,18 @@ impl Task {
     pub fn attach_link(mut self, link: Option<TicketLink>) -> Self {
         self.link = link;
         self
+    }
+
+    /// Anexa a coluna do quadro ao reidratar do banco. Não chama `touch()`.
+    pub fn attach_board_column(mut self, column: BoardColumn) -> Self {
+        self.board_column = column;
+        self
+    }
+
+    /// Move o card para outra coluna do quadro (só local).
+    pub fn set_board_column(&mut self, column: BoardColumn) {
+        self.board_column = column;
+        self.touch();
     }
 
     /// Cria, altera ou remove (`None`) o vínculo manual com um chamado.

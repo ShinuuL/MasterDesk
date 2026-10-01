@@ -13,6 +13,8 @@ Branch: `research/phase0-stack-and-architecture`
 | [ADR-007](./ADR-007-ai-provider.md) | Provider de IA | Bloqueado até Fase 6 |
 | [ADR-008](./ADR-008-mobile-strategy.md) | Estratégia mobile | Proposto — aguarda DEV |
 | [ADR-009](./ADR-009-theming.md) | Tema claro/escuro/automático | **Aceito (2026-09-02)** |
+| [ADR-010](./ADR-010-sync-channel.md) | Canal de sincronização (tempo real + polling) | ver o próprio ADR |
+| [ADR-011](./ADR-011-remembered-session-and-autostart.md) | Manter conectado e iniciar com o sistema | Proposto (2026-09-25) — testes verdes, aguarda validação manual |
 
 ## Recomendação consolidada (ADR-001/002/003/004/008)
 

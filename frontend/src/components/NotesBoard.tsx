@@ -3,6 +3,28 @@ import type { Note } from "../types";
 import * as api from "../api";
 import { NoteCard } from "./NoteCard";
 import { NoteFormModal } from "./NoteFormModal";
+import { findFreeSpot } from "../notes/placement";
+import {
+  clampZoom, DEFAULT_VIEWPORT, fitRects, parseViewport, screenToWorld, zoomAt, type Viewport,
+} from "../notes/viewport";
+
+/** Mesmo default do domínio (`Note::new`), usado só para achar espaço livre. */
+const NEW_NOTE_SIZE = { w: 300, h: 250 };
+/** A câmera do quadro é conveniência local por máquina, não estado do domínio. */
+const VIEWPORT_STORAGE_KEY = "masterdesk.notes.viewport";
+const ZOOM_STEP = 1.2;
+const DOT_GRID = 22;
+
+function loadViewport(): Viewport {
+  try {
+    return parseViewport(localStorage.getItem(VIEWPORT_STORAGE_KEY));
+  } catch {
+    return DEFAULT_VIEWPORT;
+  }
+}
+
+const noteRects = (list: Note[]) =>
+  list.map((n) => ({ x: n.position[0], y: n.position[1], w: n.size[0], h: n.size[1] }));
 
 export function NotesBoard() {
   const [notes, setNotes] = useState<Note[]>([]);
@@ -10,7 +32,12 @@ export function NotesBoard() {
   const [filter, setFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  /** `null` = diálogo fechado; senão, onde a nota vai nascer. */
+  const [creating, setCreating] = useState<[number, number] | null>(null);
+  const [viewport, setViewport] = useState<Viewport>(loadViewport);
+  const [panning, setPanning] = useState(false);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const panRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   /** Devolve o foco ao botão quando o diálogo fecha (WAI-ARIA dialog). */
   const createRef = useRef<HTMLButtonElement>(null);
   const [poppedOut, setPoppedOut] = useState<Set<string>>(new Set());
@@ -21,10 +48,17 @@ export function NotesBoard() {
     setPoppedOut(next);
   };
 
-  const refresh = async () => {
+  /**
+   * `silent`: recarga de fundo (volta do foco) não mostra esqueleto nem erro —
+   * mesmo motivo documentado no `refresh` do `TasksBoard`: a lista sumia e
+   * voltava a cada alt-tab.
+   */
+  const refresh = async ({ silent = false }: { silent?: boolean } = {}) => {
     try {
-      setLoading(true);
-      setError(null);
+      if (!silent) {
+        setLoading(true);
+        setError(null);
+      }
       const data = showArchived ? await api.listArchivedNotes() : await api.listActiveNotes();
       setNotes(data);
 
@@ -44,11 +78,15 @@ export function NotesBoard() {
         setPoppedOutBoth(new Set());
       }
     } catch (e) {
-      setError(String(e));
+      if (!silent) setError(String(e));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
+  // O listener de foco é registrado uma vez só; sem a ref ele chamaria o
+  // `refresh` da primeira renderização, com `showArchived` congelado.
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
 
   useEffect(() => {
     refresh();
@@ -64,9 +102,11 @@ export function NotesBoard() {
       try {
         const win = (await import("@tauri-apps/api/window")).getCurrentWindow();
         const un = await win.onFocusChanged(({ payload }) => {
-          if (payload && !cancelled) refresh();
+          if (payload && !cancelled) void refreshRef.current({ silent: true });
         });
+        // Desmontou durante o `await`: remove já, senão o listener vaza.
         if (!cancelled) unlisten = un;
+        else un();
       } catch {
         // fora do Tauri (browser/dev puro) — ignora
       }
@@ -186,6 +226,94 @@ export function NotesBoard() {
 
   const isEmpty = !loading && filtered.length === 0;
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(VIEWPORT_STORAGE_KEY, JSON.stringify(viewport));
+    } catch {
+      // armazenamento indisponível: a câmera só não é lembrada.
+    }
+  }, [viewport]);
+
+  /**
+   * Roda do mouse no estilo Figma: Ctrl/⌘ (e a pinça do touchpad, que chega
+   * como Ctrl+wheel) dá zoom no cursor; sem modificador, desloca o quadro.
+   * Listener nativo porque o `onWheel` do React é passivo e não deixa
+   * cancelar o zoom da própria webview.
+   */
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if ((e.target as HTMLElement).closest("textarea, .md-note-content")) return;
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      if (e.ctrlKey || e.metaKey) {
+        const factor = Math.exp(-e.deltaY * 0.002);
+        setViewport((vp) => zoomAt(vp, vp.zoom * factor, e.clientX - rect.left, e.clientY - rect.top));
+      } else {
+        const dx = e.shiftKey ? e.deltaY : e.deltaX;
+        const dy = e.shiftKey ? 0 : e.deltaY;
+        setViewport((vp) => ({ ...vp, panX: vp.panX - dx, panY: vp.panY - dy }));
+      }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  /** Arrastar o fundo (ou o botão do meio em qualquer lugar) move o quadro. */
+  const handleCanvasPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    if (target.closest(".md-zoom-controls")) return;
+    const onNote = target.closest(".md-note");
+    if (!(e.button === 1 || (e.button === 0 && !onNote))) return;
+    e.preventDefault();
+    panRef.current = { x: e.clientX, y: e.clientY, panX: viewport.panX, panY: viewport.panY };
+    setPanning(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const handleCanvasPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const start = panRef.current;
+    if (!start) return;
+    setViewport((vp) => ({
+      ...vp,
+      panX: start.panX + e.clientX - start.x,
+      panY: start.panY + e.clientY - start.y,
+    }));
+  };
+  const handleCanvasPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!panRef.current) return;
+    panRef.current = null;
+    setPanning(false);
+    e.currentTarget.releasePointerCapture(e.pointerId);
+  };
+
+  const zoomFromCenter = (next: number) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    setViewport((vp) => zoomAt(vp, next, (rect?.width ?? 0) / 2, (rect?.height ?? 0) / 2));
+  };
+
+  const fitAll = () => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setViewport(fitRects(noteRects(filtered), rect.width, rect.height));
+  };
+
+  /** Abre o diálogo já sabendo onde há espaço livre na área visível. */
+  const openCreate = () => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    const [vx, vy] = screenToWorld(viewport, 0, 0);
+    const visible = {
+      x: vx,
+      y: vy,
+      w: (rect?.width ?? 1200) / viewport.zoom,
+      h: (rect?.height ?? 800) / viewport.zoom,
+    };
+    // Na aba de arquivadas o quadro ativo não está carregado; a nota nasce no
+    // canto da área visível. Destacadas continuam ocupando o seu lugar.
+    const occupied = showArchived ? [] : noteRects(notes);
+    setCreating(findFreeSpot(occupied, NEW_NOTE_SIZE, visible));
+  };
+
   return (
     <div style={{ fontFamily: "inherit", height: "100%", display: "flex", flexDirection: "column", minHeight:0 }}>
       <header className="md-board-header">
@@ -218,7 +346,7 @@ export function NotesBoard() {
       <div className="md-create-bar">
         <button
           ref={createRef}
-          onClick={() => setCreating(true)}
+          onClick={openCreate}
           className="md-primary md-primary-accent"
         >
           Nova nota
@@ -235,18 +363,25 @@ export function NotesBoard() {
         </div>
       )}
 
-      {/* Canvas: scroll invisível mas funcional */}
+      {/* Canvas infinito: pan arrastando o fundo, zoom com Ctrl+roda. */}
       <div
-        className={`scroll-hidden canvas-desk ${isEmpty ? "" : ""}`}
+        ref={canvasRef}
+        className={`canvas-desk md-notes-canvas ${panning ? "is-panning" : ""}`}
         style={{
           position:"relative",
           flex:1,
           minHeight:0,
-          // quando vazio, sem overflow para não mostrar gutter; quando tem notas, mantém scroll mas hidden
-          overflow: isEmpty ? "hidden" : undefined,
+          overflow:"hidden",
           display: isEmpty ? "flex" : "block",
           flexDirection: isEmpty ? "column" as const : undefined,
+          // A grade de pontos acompanha a câmera, senão o pan não "se sente".
+          backgroundSize: `${DOT_GRID * viewport.zoom}px ${DOT_GRID * viewport.zoom}px`,
+          backgroundPosition: `${viewport.panX}px ${viewport.panY}px`,
         }}
+        onPointerDown={isEmpty || loading ? undefined : handleCanvasPointerDown}
+        onPointerMove={handleCanvasPointerMove}
+        onPointerUp={handleCanvasPointerUp}
+        onPointerCancel={handleCanvasPointerUp}
         aria-busy={loading}
       >
         {loading ? (
@@ -260,16 +395,19 @@ export function NotesBoard() {
             showArchived={showArchived}
             hasFilter={Boolean(filter.trim())}
             onClearFilter={()=>setFilter("")}
-            onFocusCreate={()=>setCreating(true)}
+            onFocusCreate={openCreate}
           />
         ) : (
           <>
-            {/* área virtual para absolute cards — garante altura mínima para scroll */}
-            <div style={{ position:"relative", minHeight:"100%", minWidth:"100%", height: filtered.length>0 ? "720px" : "100%" }}>
+            <div
+              className="md-notes-world"
+              style={{ transform: `translate(${viewport.panX}px, ${viewport.panY}px) scale(${viewport.zoom})` }}
+            >
               {filtered.map((n) => (
                 <NoteCard
                   key={n.id}
                   note={n}
+                  zoom={viewport.zoom}
                   onUpdate={handleUpdate}
                   onArchive={handleArchive}
                   onDelete={handleDelete}
@@ -280,14 +418,23 @@ export function NotesBoard() {
                 />
               ))}
             </div>
+            <div className="md-zoom-controls" role="toolbar" aria-label="Zoom do quadro">
+              <button onClick={() => zoomFromCenter(viewport.zoom / ZOOM_STEP)} aria-label="Diminuir zoom" title="Diminuir zoom (Ctrl+roda)">−</button>
+              <button onClick={() => zoomFromCenter(1)} title="Voltar a 100%" className="md-zoom-value">
+                {Math.round(clampZoom(viewport.zoom) * 100)}%
+              </button>
+              <button onClick={() => zoomFromCenter(viewport.zoom * ZOOM_STEP)} aria-label="Aumentar zoom" title="Aumentar zoom (Ctrl+roda)">+</button>
+              <button onClick={fitAll} title="Enquadrar todas as notas">Ajustar</button>
+            </div>
           </>
         )}
       </div>
 
       {creating && (
         <NoteFormModal
+          position={creating}
           onClose={() => {
-            setCreating(false);
+            setCreating(null);
             createRef.current?.focus();
           }}
           onCreated={handleCreated}

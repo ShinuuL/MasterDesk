@@ -14,6 +14,8 @@ use masterdesk_domain::{
 pub struct CreateUserInput {
     pub username: String,
     pub password: String,
+    /// "Manter conectado": a sessão sobrevive ao fechamento do app.
+    pub remember: bool,
 }
 
 /// Entrada para login local.
@@ -21,6 +23,8 @@ pub struct CreateUserInput {
 pub struct LoginInput {
     pub username: String,
     pub password: String,
+    /// "Manter conectado": a sessão sobrevive ao fechamento do app.
+    pub remember: bool,
 }
 
 /// Resultado de autenticação exposto à UI — **nunca** inclui `password_hash`
@@ -28,6 +32,9 @@ pub struct LoginInput {
 #[derive(Debug, Clone)]
 pub struct AuthResult {
     pub user: UserView,
+    /// Se a sessão ficou lembrada. `false` com `remember = true` significa que
+    /// o cofre do SO não estava disponível — a UI avisa em vez de fingir.
+    pub remembered: bool,
 }
 
 /// Visão pública de um usuário, sem o hash de senha.
@@ -49,9 +56,7 @@ impl AuthService {
             .provider
             .register(&input.username, &input.password)
             .await?;
-        Ok(AuthResult {
-            user: to_view(&user),
-        })
+        self.finish(&user, input.remember).await
     }
 
     /// Autentica um usuário e abre a sessão.
@@ -60,8 +65,34 @@ impl AuthService {
             .provider
             .login(&input.username, &input.password)
             .await?;
+        self.finish(&user, input.remember).await
+    }
+
+    /// Reabre a sessão lembrada, se houver. Chamado na abertura do app.
+    pub async fn restore_session(&self) -> DomainResult<Option<AuthResult>> {
+        Ok(self
+            .provider
+            .restore_session()
+            .await?
+            .map(|user| AuthResult {
+                user: to_view(&user),
+                remembered: true,
+            }))
+    }
+
+    /// Sem `remember`, apaga qualquer sessão lembrada antes: quem desmarca a
+    /// caixa num login está pedindo para esta máquina esquecê-lo, e deixar a
+    /// sessão anterior valendo contrariaria isso.
+    async fn finish(&self, user: &User, remember: bool) -> DomainResult<AuthResult> {
+        let remembered = if remember {
+            self.provider.remember_session().await?
+        } else {
+            self.provider.forget_remembered_session().await?;
+            false
+        };
         Ok(AuthResult {
-            user: to_view(&user),
+            user: to_view(user),
+            remembered,
         })
     }
 
@@ -113,6 +144,8 @@ mod tests {
     struct InMemoryAuthProvider {
         users: Mutex<HashMap<String, (User, String)>>, // username -> (user, plaintext p/ teste)
         session: Mutex<Option<UserId>>,
+        /// Sessão lembrada — sobrevive a `logout` só se ninguém a apagar.
+        remembered: Mutex<Option<UserId>>,
     }
 
     impl InMemoryAuthProvider {
@@ -120,6 +153,7 @@ mod tests {
             Self {
                 users: Mutex::new(HashMap::new()),
                 session: Mutex::new(None),
+                remembered: Mutex::new(None),
             }
         }
     }
@@ -158,11 +192,36 @@ mod tests {
 
         async fn logout(&self) -> DomainResult<()> {
             *self.session.lock().unwrap() = None;
+            *self.remembered.lock().unwrap() = None;
             Ok(())
         }
 
         async fn is_authenticated(&self) -> DomainResult<bool> {
             Ok(self.session.lock().unwrap().is_some())
+        }
+
+        async fn remember_session(&self) -> DomainResult<bool> {
+            let current = *self.session.lock().unwrap();
+            let id = current.ok_or_else(|| DomainError::unauthorized("sem sessão"))?;
+            *self.remembered.lock().unwrap() = Some(id);
+            Ok(true)
+        }
+
+        async fn restore_session(&self) -> DomainResult<Option<User>> {
+            let Some(id) = *self.remembered.lock().unwrap() else {
+                return Ok(None);
+            };
+            let users = self.users.lock().unwrap();
+            let user = users.values().map(|(u, _)| u).find(|u| u.id == id).cloned();
+            if let Some(u) = &user {
+                *self.session.lock().unwrap() = Some(u.id);
+            }
+            Ok(user)
+        }
+
+        async fn forget_remembered_session(&self) -> DomainResult<()> {
+            *self.remembered.lock().unwrap() = None;
+            Ok(())
         }
     }
 
@@ -177,6 +236,7 @@ mod tests {
             .register(CreateUserInput {
                 username: "alice".into(),
                 password: "superSecret1".into(),
+                remember: false,
             })
             .await
             .unwrap();
@@ -190,6 +250,7 @@ mod tests {
         svc.register(CreateUserInput {
             username: "bob".into(),
             password: "password123".into(),
+            remember: false,
         })
         .await
         .unwrap();
@@ -200,6 +261,7 @@ mod tests {
             .login(LoginInput {
                 username: "bob".into(),
                 password: "password123".into(),
+                remember: false,
             })
             .await
             .unwrap();
@@ -212,6 +274,7 @@ mod tests {
             .login(LoginInput {
                 username: "bob".into(),
                 password: "wrong".into(),
+                remember: false,
             })
             .await;
         assert!(matches!(err, Err(DomainError::Unauthorized(_))));
@@ -223,6 +286,7 @@ mod tests {
         svc.register(CreateUserInput {
             username: "carol".into(),
             password: "password123".into(),
+            remember: false,
         })
         .await
         .unwrap();
@@ -230,6 +294,7 @@ mod tests {
             .register(CreateUserInput {
                 username: "carol".into(),
                 password: "anotherpass".into(),
+                remember: false,
             })
             .await;
         assert!(matches!(dup, Err(DomainError::Conflict(_))));
@@ -242,6 +307,7 @@ mod tests {
             .register(CreateUserInput {
                 username: "dave".into(),
                 password: "password123".into(),
+                remember: false,
             })
             .await
             .unwrap();
@@ -252,6 +318,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn remember_then_restore_reopens_the_session() {
+        let svc = AuthService::new(provider());
+        let res = svc
+            .register(CreateUserInput {
+                username: "rita".into(),
+                password: "password123".into(),
+                remember: true,
+            })
+            .await
+            .unwrap();
+        assert!(res.remembered);
+
+        let restored = svc.restore_session().await.unwrap().expect("lembrada");
+        assert_eq!(restored.user.id, res.user.id);
+        assert!(restored.remembered);
+    }
+
+    #[tokio::test]
+    async fn login_without_remember_forgets_a_previous_remembered_session() {
+        let svc = AuthService::new(provider());
+        svc.register(CreateUserInput {
+            username: "saulo".into(),
+            password: "password123".into(),
+            remember: true,
+        })
+        .await
+        .unwrap();
+
+        let res = svc
+            .login(LoginInput {
+                username: "saulo".into(),
+                password: "password123".into(),
+                remember: false,
+            })
+            .await
+            .unwrap();
+        assert!(!res.remembered);
+        assert!(svc.is_authenticated().await.unwrap(), "o login atual vale");
+        assert!(svc.restore_session().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn logout_clears_the_remembered_session() {
+        let svc = AuthService::new(provider());
+        svc.register(CreateUserInput {
+            username: "tais".into(),
+            password: "password123".into(),
+            remember: true,
+        })
+        .await
+        .unwrap();
+        svc.logout().await.unwrap();
+        assert!(svc.restore_session().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
     async fn validation_bubbles_before_provider() {
         let svc = AuthService::new(provider());
         // username curto
@@ -259,6 +381,7 @@ mod tests {
             .register(CreateUserInput {
                 username: "ab".into(),
                 password: "password123".into(),
+                remember: false,
             })
             .await;
         assert!(matches!(err, Err(DomainError::Validation(_))));
@@ -267,6 +390,7 @@ mod tests {
             .register(CreateUserInput {
                 username: "validuser".into(),
                 password: "short".into(),
+                remember: false,
             })
             .await;
         assert!(matches!(err, Err(DomainError::Validation(_))));
