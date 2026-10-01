@@ -1378,3 +1378,23 @@ html.note-window-body, body.note-window-body{
 .md-filter-chip--status{max-width:none; padding:2px; background:transparent; border-color:transparent}
 .md-filter-chip--status .md-status-badge{white-space:normal; text-align:left}
 .md-filter-client-search{width:100%; margin-bottom:8px}
+
+/* ---------------------------------------------------------------------------
+   Quadro de notas: canvas infinito (pan/zoom)
+--------------------------------------------------------------------------- */
+.md-notes-canvas{cursor:grab; touch-action:none}
+.md-notes-canvas.is-panning{cursor:grabbing}
+.md-notes-world{position:absolute; left:0; top:0; width:0; height:0; transform-origin:0 0}
+.md-zoom-controls{
+  position:absolute; right:16px; bottom:16px; z-index:5;
+  display:flex; gap:2px; padding:4px;
+  background:var(--surface); border:1px solid var(--line);
+  border-radius:12px; box-shadow:var(--shadow-md); cursor:default;
+}
+.md-zoom-controls button{
+  min-width:32px; height:28px; padding:0 8px;
+  border:none; border-radius:8px; background:transparent;
+  color:var(--text); font:inherit; font-size:13px; cursor:pointer;
+}
+.md-zoom-controls button:hover{background:var(--surface-plain)}
+.md-zoom-value{font-variant-numeric:tabular-nums; min-width:52px}

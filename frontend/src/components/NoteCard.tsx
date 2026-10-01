@@ -26,9 +26,11 @@ interface Props {
   onCloseWindow?: (id: string) => void;
   /** True when rendering in an isolated note-window (via ?note= URL) */
   noteWindowMode?: boolean;
+  /** Zoom do quadro: o arrasto converte pixels de tela em coordenadas do mundo. */
+  zoom?: number;
 }
 
-export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onToggleAot, onPopOut, onCloseWindow, noteWindowMode }: Props) {
+export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onToggleAot, onPopOut, onCloseWindow, noteWindowMode, zoom = 1 }: Props) {
   const { theme } = useTheme();
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(note.title);
@@ -105,14 +107,18 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
   const handleMouseDown = (e: React.MouseEvent) => {
     // In note-window mode, don't prevent default — let the OS handle window dragging
     if (noteWindowMode) return;
+    // Não deixa o quadro iniciar um pan nem selecionar texto durante o arrasto.
+    e.stopPropagation();
+    if ((e.target as HTMLElement).closest("button")) return;
+    e.preventDefault();
 
     const startX = e.clientX;
     const startY = e.clientY;
     dragRef.current = { x: startX, y: startY, orig: [...note.position] as [number, number] };
     const onMove = (ev: MouseEvent) => {
       if (!dragRef.current) return;
-      const dx = ev.clientX - dragRef.current.x;
-      const dy = ev.clientY - dragRef.current.y;
+      const dx = (ev.clientX - dragRef.current.x) / zoom;
+      const dy = (ev.clientY - dragRef.current.y) / zoom;
       const nx = dragRef.current.orig[0] + dx;
       const ny = dragRef.current.orig[1] + dy;
       const el = document.getElementById(`note-${note.id}`);
@@ -123,8 +129,8 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
     };
     const onUp = (ev: MouseEvent) => {
       if (!dragRef.current) return;
-      const dx = ev.clientX - dragRef.current.x;
-      const dy = ev.clientY - dragRef.current.y;
+      const dx = (ev.clientX - dragRef.current.x) / zoom;
+      const dy = (ev.clientY - dragRef.current.y) / zoom;
       const nx = dragRef.current.orig[0] + dx;
       const ny = dragRef.current.orig[1] + dy;
       document.removeEventListener("mousemove", onMove);
@@ -179,9 +185,12 @@ export function NoteCard({ note, onUpdate, onArchive, onDelete, onTogglePin, onT
       }}
       onMouseUp={(e) => {
         if (noteWindowMode) return;
-        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-        if (Math.abs(rect.width - note.size[0]) > 2 || Math.abs(rect.height - note.size[1]) > 2) {
-          handleResizeEnd(Math.round(rect.width), Math.round(rect.height));
+        // offsetWidth/Height ignoram o `scale` do quadro (o bounding rect não).
+        const el = e.currentTarget as HTMLDivElement;
+        const w = el.offsetWidth;
+        const h = el.offsetHeight;
+        if (Math.abs(w - note.size[0]) > 2 || Math.abs(h - note.size[1]) > 2) {
+          handleResizeEnd(Math.round(w), Math.round(h));
         }
       }}
       role="article"
